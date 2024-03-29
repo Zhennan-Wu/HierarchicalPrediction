@@ -19,18 +19,29 @@ class HP:
     '''
     Hierarchical Prior
     '''
-    def __init__(self, gamma_param1, gamma_param2, base, base_size, batch_size, sample_size = 100):
+    def __init__(self, gamma_param1, gamma_param2, num_topic, num_word, batch, batch_size, sample_size = 100):
+        '''
+        '''
         self.GAMMA = dist.Gamma(torch.tensor(gamma_param1), torch.tensor(gamma_param2))
-        self.Gs3 = {}
-        self.Gs2 = {}
-        self.Gs1 = {}
-        self.Gb = {}
+        self.batch = batch
         self.batch_size = batch_size
         self.sample_size = sample_size
-        self.tau = torch.ones(base_size)
-        self.generate_concenctration()
+        self.num_topic = num_topic
+        self.num_word = num_word
+
+        self.init_concenctration()
+        self.pi_g, self.tau = self.generate_prior(num_topic, num_word)
+        self.init_super_category()
     
-    def generate_concenctration(self):
+    def generate_prior(self, topic_dim, word_dim):
+        '''
+        Generate prior distribution for the model
+        '''
+        pi_g = dist.Dirichlet(torch.ones(topic_dim)).sample()
+        tau = dist.Dirichlet(torch.ones(word_dim)).sample()
+        return pi_g, tau
+
+    def init_concenctration(self):
         '''
         Generate concentration parameters for the Dirichlet distribution
         '''
@@ -38,110 +49,100 @@ class HP:
         self.alpha1 = self.GAMMA.sample()
         self.alpha2 = self.GAMMA.sample()
         self.alpha3 = self.GAMMA.sample()
-
         
         self.beta = self.GAMMA.sample()
         self.gamma = self.GAMMA.sample()
-        self.eta = None
-        self.generate_prior()
+
+    def init_super_category(self):
+        '''
+        Initialize super category
+        '''
+        # Sample distribution parameter from prior for super category class
+        self.eta = self.GAMMA.sample()
+
+        # A dictionary with key to be the different super categories and value to be the count of each super category
+        self.super_category_collection = {}
+
+        # A dictionary with key to be the different super categories and value to be a dictionary with key to be the different base categories and value to be the count of each base category
+        self.base_category_collection = {} 
+
+        # Keep track of the number of super categories
+        self.super_category_index = 0
+
+        # Keep track of the number of base categories in each super category
+        self.base_category_indices = {}
 
     def generate_prior(self):
         self.base = dist.Dirichlet(self.beta*self.tau)
 
-    def nested_CRP(self, sample_size = None):
+    def nested_CRP(self):
         '''
         Nested Chinese restaurant process to generate two level hierarchical DP
         '''
-        # Sample distribution parameter from prior for super category class
-        eta = self.GAMMA.sample()
-
-        # A dictionary with key to be the different super categories and value to be the count of each super category
-        super_category_collection = {}
-
-        # A dictionary with key to be the different super categories and value to be the topic prior of each super category
-        topic_prior_collection = {}
-
-        # A dictionary with key to be the different super categories and value to be a dictionary with key to be the different base categories and value to be the count of each base category
-        base_category_collection = {} 
-
-        # A dictionary with key to be the different super categories and value to be a dictionary with key to be the different base categories and value to be the topic distribution of each base category
-        topic_distribution_collection = {}
-
-        # A dictionary with key to be the different super categories and value to be a dictionary with key to be the different base categories and value to be the prior of each base category
-        base_prior_collection = {}
-
-        # A dictionary with key to be the different super categories and value to be a dictionary with key to be the different base categories and value to be a dictionary with key to be the different topics and value to be the word distribution of each topic
-        word_distribution_collection = {}
-
-        # Keep track of the maximum number of base categories
-        base_category_count = 0
-
-        if (sample_size == None):
-            sample_size = np.square(self.sample_size)
-
-        for _ in range(sample_size):
-            # Select super category label
-            values = list(super_category_collection.keys())
-            count = list(super_category_collection.values()) + [eta]
-            probs = torch.tensor(count) / sum(count)
-            index = dist.Categorical(probs).sample()
-            if index < len(values):
-                super_cat = values[index]
-            else:
-                # Draw new super category from global distribution
-                super_cat = dist.Dirichlet(self.eta*self.tau).sample()
-            if (super_cat in super_category_collection):
-                super_category_collection[super_cat] += 1
-            else:
-                super_category_collection[super_cat] = 1
-                base_category_collection[super_cat] = {}
-                # Sample distribution parameter from prior for one base category
-                base_prior_collection[super_cat] = self.GAMMA.sample()
-
+        count = list(self.super_category_collection.values()) + [self.eta]
+        probs = torch.tensor(count) / sum(count)
+        super_cat = dist.Categorical(probs).sample() + 1
+        # Generate new category
+        if (super_cat == len(count)):
+            self.super_category_index += 1
+            self.super_category_collection[self.super_category_index] = 1
+            self.base_category_indices[self.super_category_index] = 1
+            self.base_category_collection[self.super_category_index] = {}
+            self.base_category_collection[self.super_category_index][self.base_category_indices[self.super_category_index]] = 1
+        # Update existing category
+        else:
+            self.super_category_collection[super_cat] += 1
             # Select base category label under the selected super category
-            base_category_values = list(base_category_collection[super_cat].keys())
-            base_count = list(base_category_collection[super_cat].values()) + [base_prior_collection[super_cat]]
+            base_count = list(self.base_category_collection[super_cat].values()) + [self.eta]
             base_probs = torch.tensor(base_count) / sum(base_count)
-            base_index = dist.Categorical(base_probs).sample()
-            if base_index < len(base_category_values):
-                base_cat = base_category_values[base_index]
+            base_cat = dist.Categorical(base_probs).sample() + 1
+            # Create new base category
+            if (base_cat == len(base_count)):
+                self.base_category_indices[super_cat] += 1
+                self.base_category_collection[super_cat][base_cat] = 1
+            # Update existing base category
             else:   
-                # Draw new base category base category prior of the selected super category
-                base_cat = dist.Dirichlet(base_prior_collection[super_cat]*self.tau).sample()
-            if (base_cat in base_category_collection[super_cat]):
-                base_category_collection[super_cat][base_cat] += 1
-            else:
-                base_category_collection[super_cat][base_cat] = 1
+                self.base_category_collection[super_cat][base_cat] += 1
+        return [super_cat, base_cat]
             
-            # Update the maximum number of base categories
-            base_category_count = max(base_category_count, len(base_category_collection[super_cat].keys()))
-        
-        return base_category_collection, base_category_count
-            
+    def create_z_label(self):
+        '''
+        Generate latent variable z for each sample
+        '''
+        z = []
+        for _ in range(self.batch_size):
+            z.append(self.nested_CRP())
+        return torch.tensor(z)
+    
     def dirichlet_process(self, alpha, base = None, sample_size = None):
         '''
         Chinese restaurant process generating a Dirichlet process
         '''
-        value_collection = {}
+        value_collection = []
+        value_indices = {}
         if (sample_size == None):
             sample_size = self.sample_size
         for _ in range(sample_size):
-            values = list(value_collection.keys())
-            count = list(value_collection.values()) + [alpha]
+            values = list(value_indices.keys())
+            count = list(value_indices.values()) + [alpha]
             probs = torch.tensor(count) / sum(count)
             index = dist.Categorical(probs).sample()
-            if index < len(values):
-                sample = values[index]
+            if (index < len(values)):
+                value_indices[index] += 1
             else:
                 if (base == None):
                     sample = self.base.sample()
                 else:
-                    sample = base.sample() 
-            if (sample in value_collection):
-                value_collection[sample] += 1
-            else:
-                value_collection[sample] = 1
-        return value_collection
+                    weights = base[0]
+                    values = base[1]
+                    sample = values[dist.Categorical(weights).sample()]
+                if (sample in value_collection):
+                    value_indices[value_collection.index(sample)] += 1
+                else:
+                    value_collection.append(sample)
+                    value_indices[index] = 1
+        weights = torch.tensor(list(value_indices.values()))/sum(list(value_indices.values()))
+        return weights, value_collection
     
     def dirichlet_process_posterior(self, observation, alpha, base = None, sample_size = None):
         '''
@@ -172,6 +173,44 @@ class HP:
                 value_collection[sample] = 1
         return value_collection
     
+    def generate_hdp(self):
+        '''
+        Generate hierarchical DP, need to be called after generate z labels
+        '''
+        super_category_dists = []
+        base_category_dists = []
+        for super_cat in range(self.super_category_index):
+            base_category_prior = dist.Dirichlet(self.pi_g*self.alpha3).sample()
+            super_category_dists.append(base_category_prior)
+            topic_dists = []
+            for _ in range(self.base_category_indices[super_cat]):
+                topic_dists.append(dist.Dirichlet(base_category_prior*self.alpha2).sample())
+            base_category_dists.append(topic_dists)
+        
+        word_dists = []
+        for _ in range(self.num_topic):
+            word_dists.append(dist.Dirichlet(self.tau*self.beta).sample())
+        return super_category_dists, base_category_dists, word_dists
+
+    def infer(self):
+        '''
+        '''
+        # top down generate hidden variable h3
+        z_labels = self.create_z_label()
+        super_category_dists, base_category_dists, word_dists = self.generate_hdp()
+        vocab = []
+        for i in range(self.batch_size):
+            super_cat = z_labels[i][0].item()
+            base_cat = z_labels[i][1].item()
+            topic_dist = dist.Dirichlet(base_category_dists[super_cat][base_cat]*self.alpha1).sample()
+            words = []
+            for j in range(self.num_word):
+                topic = dist.Categorical(topic_dist).sample()
+                words.append(dist.Categorical(word_dists[topic]).sample())
+            vocab.append(words)
+        
+        
+
     def hierarchical_dp_weight_update(self, h3):
         '''
         Update the weight of the hierarchical DP based on the posterior distribution
