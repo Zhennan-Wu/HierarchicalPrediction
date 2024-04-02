@@ -114,6 +114,14 @@ class HP:
             z.append(self.nested_CRP())
         return torch.tensor(z)
     
+    def mixture_distribution(self, continous_part, discrete_part, cont_weight):
+        '''
+        Mixture distribution of continuous and discrete distribution
+        '''
+        cont_sample = continous_part.sample()
+        disc_sample = discrete_part.sample()
+        return cont_sample*cont_weight + disc_sample*(1-cont_weight)
+    
     def dirichlet_process(self, alpha, base = None, sample_size = None):
         '''
         Chinese restaurant process generating a Dirichlet process
@@ -175,7 +183,7 @@ class HP:
     
     def generate_hdp(self):
         '''
-        Generate hierarchical DP, need to be called after generate z labels
+        Generate hierarchical DP distribution reference table, need to be called after generate z labels
         '''
         super_category_dists = []
         base_category_dists = []
@@ -199,18 +207,28 @@ class HP:
         z_labels = self.create_z_label()
         super_category_dists, base_category_dists, word_dists = self.generate_hdp()
         vocab = []
+        super_cat_lst = []
+        base_cat_lst = []
+        topic_lst = []
         for i in range(self.batch_size):
             super_cat = z_labels[i][0].item()
             base_cat = z_labels[i][1].item()
             topic_dist = dist.Dirichlet(base_category_dists[super_cat][base_cat]*self.alpha1).sample()
             words = []
+            topics = []
             for j in range(self.num_word):
                 topic = dist.Categorical(topic_dist).sample()
+                topics.append(topic)
                 words.append(dist.Categorical(word_dists[topic]).sample())
             vocab.append(words)
+            super_cat_lst.append(super_cat)
+            base_cat_lst.append(base_cat)
+            topic_lst.append(topics)
+        
+        # need to keep track of topic count
         
         
-
+        
     def hierarchical_dp_weight_update(self, h3):
         '''
         Update the weight of the hierarchical DP based on the posterior distribution
