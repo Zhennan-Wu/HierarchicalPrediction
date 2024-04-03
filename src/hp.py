@@ -226,8 +226,7 @@ class HP:
             topic_lst.append(topics)
         
         # need to keep track of topic count
-        
-        
+    
         
     def hierarchical_dp_weight_update(self, h3):
         '''
@@ -270,3 +269,31 @@ class HP:
         h3  = phi_n.sample()
 
         return h3
+    
+    def topic_sampling(self, super_cat, base_cat):
+        '''
+        - Update the topic distribution for each base category under the super category
+        - Sample a topic for each word in the document
+        '''
+        pass
+
+    def init_hierarchy(self, batch):
+        '''
+        Initialize the hierarchy
+        '''
+
+        # assign hierarchy to each sample
+        super_cats = []
+        base_cats = []
+        topics = []
+        for data in batch:
+            super_cat, base_cat = self.nested_CRP()
+            super_cats.append(super_cat)
+            base_cats.append(base_cat)
+            topic = self.topic_sampling(super_cat, base_cat)
+            topics.append(topic)
+
+        # update the hierarchy
+        
+
+        
