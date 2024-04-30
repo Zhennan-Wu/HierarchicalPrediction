@@ -1,5 +1,6 @@
 import torch
 import pyro
+from pyro.distributions import Dirichlet
 
 
 # Notation aligned with the paper "Hierarchical Dirichlet Processes"
@@ -99,5 +100,12 @@ def calc_pos_k(k, j, i, t):
 
 
  
+##########################################################################################################
+#
+# The following code is the implementation of the Hierarchical Dirichlet Processes
+#
+##########################################################################################################
 
+Dir = Dirichlet(torch.cat((torch.sum(vec_m, dim = 0), torch.tensor([gamma]))))
+beta = Dir.sample(K+1)
 
