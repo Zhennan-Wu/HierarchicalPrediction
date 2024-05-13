@@ -54,7 +54,7 @@ class DirichletProcess:
         - num_samples (int): the number of samples to draw
         '''
         # Sample from the base distribution with probability alpha / (alpha + N)
-        for i in range(num_samples):
+        for _ in range(num_samples):
             total_counts = sum(self.weights)
             probs = torch.tensor(self.weights) / total_counts
             p_existing = self.alpha / (self.alpha + total_counts)
@@ -88,7 +88,7 @@ class DirichletProcess:
         return {"values": self.values, "weights": self.weights}
 
 class HierarchicalDirichletProcess:
-    def __init__(self, layers: int):
+    def __init__(self, layers: int, fixed_layers: Dict = None):
         '''
         Initialize a Hierarchical Dirichlet Process with layers
 
@@ -96,10 +96,27 @@ class HierarchicalDirichletProcess:
         - layers (int): the number of layers in the Hierarchical Dirichlet Process
         '''
         self.layers = layers
-        self.fixed
+        self.layer_constrains = False
+        self.implied_constraints = None
+        self.fixed_layres = fixed_layers
+        if (fixed_layers is not None):
+            fix_keys = fixed_layers.keys()
+            fix_values = fixed_layers.values()
+            if (all(fix_keys[i] <= fix_keys[i+1] for i in range(len(fix_keys)-1))):
+                raise ValueError("The fixed layers should be in increasing order")
+            if (all(fix_values[i] <= fix_values[i+1] for i in range(len(fix_values)-1))):
+                raise ValueError("The fixed layers should have increasing number of categories")
+            self.layer_constrains = True
+            layer_index = [float('inf')]*layers
+            self.implied_constraints = {}
+            for i in range(layers):
+                if (i in fixed_layers.keys()):
+                    layer_index[i] = fixed_layers[i]
+            for i in range(layers):
+                self.implied_constraints[i] = min(self.layer_index[:i+1])
         self.categories_per_layer = torch.zeros(layers, dtype=torch.int32)
 
-    def summarize_CRP(self, labels: Union[torch.Tensor, list]):
+    def summarize_CRP(self, labels: Union[torch.Tensor, list], indices: Union[torch.Tensor, list]):
         '''
         Summarize the Chinese Restaurant Process to get the unique values and their counts
 
@@ -111,17 +128,22 @@ class HierarchicalDirichletProcess:
         - counts (torch.Tensor): the counts of the unique values in the labels tensor or list of tensors (same value in different tensors are considered as different values)
         '''
         unique_values_list = []
+        label_indices_list = []
         counts_list = []
         if (isinstance(labels, list)):
-            for label in labels:
-                unique_values, counts = torch.unique(label, return_counts=True)
+            for label, index in zip(labels, indices):
+                unique_values, inverse_indices, counts = torch.unique(label, return_inverse = True, return_counts=True)
+                for i in range(unique_values.shape[0]):
+                    label_indices_list.append(index[torch.where(inverse_indices == i)])
                 unique_values_list.append(unique_values)
                 counts_list.append(counts)
             unique_values = torch.cat(unique_values_list, dim=0)
             counts = torch.cat(counts_list, dim=0)
         else:
-            unique_values, counts = torch.unique(labels, return_counts=True)
-        return unique_values, counts
+            unique_values, inverse_indices, counts = torch.unique(labels, return_inverse = True, return_counts=True)
+            for i in range(unique_values.shape[0]):
+                label_indices_list.append(indices[torch.where(inverse_indices == i)])
+        return unique_values, label_indices_list, counts
     
     def generate_CRP(self, sample_size: int, eta: float):
         '''
@@ -134,7 +156,7 @@ class HierarchicalDirichletProcess:
         Returns:
         - labels (torch.Tensor): the labels of the samples
         '''
-        labels = torch.tensor([0])
+        labels = torch.tensor([0], dtype=torch.int32)
         for _ in range(1, sample_size):
             unique_values, counts = torch.unique(labels, return_counts=True)
             if (torch.rand(1) < eta/(eta + torch.sum(counts))):
@@ -147,28 +169,46 @@ class HierarchicalDirichletProcess:
                 labels = torch.cat((labels, torch.tensor([new_label])), dim=0)
         return labels
 
-    def generate_fixed_categories(self, sample_size: int, eta: float, num_categories: int):
+    def generate_fixed_categories(self, parent_categories_counts: torch.Tensor, eta: float, num_categories: int):
         '''
-        Generate a Chinese Restaurant Process with sample size sample_size and concentration parameter eta
-        
+        Generate a Chinese Restaurant Process with sample size sample_size and concentration parameter eta with fixed number of categories
+
         Parameters:
         - sample_size (int): the number of samples to generate labels for
+        - eta (float): the concentration parameter of the Chinese Restaurant Process
         - num_categories (int): the number of categories to generate
 
         Returns:
         - labels (torch.Tensor): the labels of the samples
         '''
-        labels = torch.tensor([0])
-        for _ in range(1, sample_size):
-            unique_values, counts = torch.unique(labels, return_counts=True)
-            new_label = torch.max(unique_values) + 1
-            if (torch.rand(1) < eta/(eta + torch.sum(counts)) and new_label < num_categories):
-                # Add a new label
-                labels = torch.cat((labels, new_label.unsqueeze(0)), dim=0)
-            else:
-                # Select an existing label
-                new_label = Categorical(counts).sample().item()
-                labels = torch.cat((labels, torch.tensor([new_label])), dim=0)
+        num_parent_categories = parent_categories_counts.shape[0]
+        if (num_categories < num_parent_categories):
+            raise ValueError("The number of child categories should be greater than the number of parent categories")
+        parent_child_relation = Dict(zip(list(range(num_categories)),list(range(num_categories))))
+        additional_categories = num_categories - num_parent_categories
+        for i in range(additional_categories):
+            parent_category = torch.randint(0, num_parent_categories, (1,))
+            parent_child_relation[parent_category.item()].append(i+num_parent_categories)
+        parent_categories_counts = parent_categories_counts.tolist()
+        parent_child_list = list(parent_child_relation.values())
+
+        labels = []
+        for p_count, p_c in zip(parent_categories_counts, parent_child_list):
+            p_labels = []
+            for _ in range(p_count):
+                counts = len(set(p_labels))
+                candidates = list(set(p_c) - set(p_labels))
+                if (torch.rand(1) < eta/(eta + counts) and len(candidates) > 0):
+                    # Add a new label
+                    new_label = candidates[torch.randint(0, len(candidates), (1,)).item()]
+                    p_labels.append(new_label)
+                else:
+                    # Select an existing label
+                    new_label = p_labels[torch.randint(0, len(p_labels), (1,)).item()]
+                    p_labels.append(new_label)
+            labels.append(torch.tensor(p_labels))
+        print(parent_categories_counts)
+        print(labels)
         return labels
     
     def generate_nCRP(self, sample_size: int, eta: float):
@@ -183,17 +223,61 @@ class HierarchicalDirichletProcess:
         - label_hierarchy (torch.Tensor): the labels of the samples in the nested Chinese Restaurant Process
         '''
         label_hierarchy = []
-        labels = self.generate_CRP(sample_size, eta)
+        prev_labels = self.generate_CRP(sample_size, eta)
+        prev_indices = torch.arange(sample_size)
+        prev_unique_values = torch.zeros(1)
+        prev_counts = torch.zeros(1)
         label_hierarchy.append(labels)
-        for l in range(self.layers-1):
-            unique_values, counts = self.summarize_CRP(labels)
+        for l in range(1, self.layers):
+            print("labels", labels)
+            print("indices", indices)
+            unique_values, indices, counts = self.summarize_CRP(prev_labels, prev_indices)
             num_categories = unique_values.shape[0]
-            with Pool(num_categories) as p:
-                params =list(itertools.product(counts.tolist(), [eta]))
-                labels = p.starmap(self.generate_CRP, params)
-            label_hierarchy.append(torch.cat(labels, dim=0))
+            if (num_categories > self.implied_constraints[l]):
+                indices = prev_indices
+                unique_values = prev_unique_values
+                counts = prev_counts
+                num_categories = unique_values.shape[0]
+                labels =self.generate_fixed_categories(counts, eta, self.fixed_layers[l])   
+            elif (l in self.fixed_layers.keys()):
+                labels =self.generate_fixed_categories(counts, eta, self.fixed_layers[l])               
+            else:
+                with Pool(num_categories) as p:
+                    params =list(itertools.product(counts.tolist(), [eta]))
+                    labels = p.starmap(self.generate_CRP, params)
+            global_indices = torch.cat(indices, dim=0)
+            new_layer_label = torch.zeros(sample_size, dtype=torch.long)
+            print(torch.cat(labels, dim=0).shape)
+            new_layer_label[global_indices] = torch.cat(labels, dim=0)
+            label_hierarchy.append(new_layer_label)
+
+            prev_labels = labels
+            prev_indices = indices
+            prev_unique_values = unique_values
+            prev_counts = counts
+        print("labels", labels)
+        print("indices", indices)
         return torch.stack(label_hierarchy, dim=0).t()
 
+    def summarize_nCRP(self, label_hierarchy: torch.Tensor):
+        '''
+        Summarize the nested Chinese Restaurant Process to get the unique values and their counts
+
+        Parameters:
+        - label_hierarchy (torch.Tensor): the labels of the samples in the nested Chinese Restaurant Process
+
+        Returns:
+        - unique_values (torch.Tensor): the unique values in the labels tensor or list of tensors (same value in different tensors are considered as different values)
+        - counts (torch.Tensor): the counts of the unique values in the labels tensor or list of tensors (same value in different tensors are considered as different values)
+        '''
+        num_categories_per_layer = {}
+        for l in range(self.layers):
+            unique_values = torch.unique(label_hierarchy[:, :l+1], dim=0)
+            print("layer: ", l)
+            print("unique values: ", unique_values)
+            num_categories_per_layer[l] = unique_values.shape[0]
+        return num_categories_per_layer
+    
     def generate_HDP(self):
         '''
         Generate a Hierarchical Dirichlet Process
@@ -219,6 +303,8 @@ if __name__ == "__main__":
     # print(dp.get_values())
     # print(dp.get_weights())
 
-    hp = HierarchicalDirichletProcess(2)
+    hp = HierarchicalDirichletProcess(3, {1: 3})
     labels = hp.generate_nCRP(100, 1)
     print(labels)
+    num_categories_per_layer = hp.summarize_nCRP(labels)
+    print(num_categories_per_layer)
