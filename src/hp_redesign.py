@@ -98,14 +98,15 @@ class HierarchicalDirichletProcess:
         self.layers = layers
         self.layer_constrains = False
         self.implied_constraints = None
-        self.fixed_layres = fixed_layers
+        self.fixed_layers = fixed_layers
         if (fixed_layers is not None):
-            fix_keys = fixed_layers.keys()
-            fix_values = fixed_layers.values()
-            if (all(fix_keys[i] <= fix_keys[i+1] for i in range(len(fix_keys)-1))):
-                raise ValueError("The fixed layers should be in increasing order")
-            if (all(fix_values[i] <= fix_values[i+1] for i in range(len(fix_values)-1))):
-                raise ValueError("The fixed layers should have increasing number of categories")
+            fix_keys = list(fixed_layers.keys())
+            fix_values = list(fixed_layers.values())
+            if (len(fix_keys) > 1):
+                if (all(fix_keys[i] <= fix_keys[i+1] for i in range(len(fix_keys)-1))):
+                    raise ValueError("The fixed layers should be in increasing order, get {}".format(fix_keys))
+                if (all(fix_values[i] <= fix_values[i+1] for i in range(len(fix_values)-1))):
+                    raise ValueError("The fixed layers should have increasing number of categories, get{}".format(fix_values))
             self.layer_constrains = True
             layer_index = [float('inf')]*layers
             self.implied_constraints = {}
@@ -113,7 +114,7 @@ class HierarchicalDirichletProcess:
                 if (i in fixed_layers.keys()):
                     layer_index[i] = fixed_layers[i]
             for i in range(layers):
-                self.implied_constraints[i] = min(self.layer_index[:i+1])
+                self.implied_constraints[i] = min(layer_index[i:])
         self.categories_per_layer = torch.zeros(layers, dtype=torch.int32)
 
     def summarize_CRP(self, labels: Union[torch.Tensor, list], indices: Union[torch.Tensor, list]):
@@ -184,12 +185,14 @@ class HierarchicalDirichletProcess:
         num_parent_categories = parent_categories_counts.shape[0]
         if (num_categories < num_parent_categories):
             raise ValueError("The number of child categories should be greater than the number of parent categories")
-        parent_child_relation = Dict(zip(list(range(num_categories)),list(range(num_categories))))
+        child_categories = list(range(num_categories))
+        child_categories = [[x] for x in child_categories]
+        parent_child_relation = dict(zip(list(range(num_categories)),child_categories))
         additional_categories = num_categories - num_parent_categories
         for i in range(additional_categories):
             parent_category = torch.randint(0, num_parent_categories, (1,))
             parent_child_relation[parent_category.item()].append(i+num_parent_categories)
-        parent_categories_counts = parent_categories_counts.tolist()
+        parent_categories_counts = parent_categories_counts.to(torch.int).tolist()
         parent_child_list = list(parent_child_relation.values())
 
         labels = []
@@ -207,8 +210,7 @@ class HierarchicalDirichletProcess:
                     new_label = p_labels[torch.randint(0, len(p_labels), (1,)).item()]
                     p_labels.append(new_label)
             labels.append(torch.tensor(p_labels))
-        print(parent_categories_counts)
-        print(labels)
+
         return labels
     
     def generate_nCRP(self, sample_size: int, eta: float):
@@ -226,28 +228,39 @@ class HierarchicalDirichletProcess:
         prev_labels = self.generate_CRP(sample_size, eta)
         prev_indices = torch.arange(sample_size)
         prev_unique_values = torch.zeros(1)
-        prev_counts = torch.zeros(1)
-        label_hierarchy.append(labels)
-        for l in range(1, self.layers):
-            print("labels", labels)
-            print("indices", indices)
+        prev_counts = torch.tensor([sample_size])
+        label_hierarchy.append(prev_labels)
+        l = 1
+        while (l < self.layers):
             unique_values, indices, counts = self.summarize_CRP(prev_labels, prev_indices)
             num_categories = unique_values.shape[0]
             if (num_categories > self.implied_constraints[l]):
-                indices = prev_indices
-                unique_values = prev_unique_values
-                counts = prev_counts
-                num_categories = unique_values.shape[0]
-                labels =self.generate_fixed_categories(counts, eta, self.fixed_layers[l])   
-            elif (l in self.fixed_layers.keys()):
-                labels =self.generate_fixed_categories(counts, eta, self.fixed_layers[l])               
+                label_hierarchy.pop()
+                if (l == 1):
+                    indices = torch.arange(sample_size).unsqueeze(0)
+                    unique_values = torch.zeros(1).unsqueeze(0)
+                    counts = torch.tensor(sample_size).unsqueeze(0)
+                    num_categories = 1
+                else:
+                    indices = prev_indices
+                    unique_values = prev_unique_values
+                    counts = prev_counts
+                    num_categories = unique_values.shape[0]
+                num_subcategories = self.implied_constraints[l]
+                labels =self.generate_fixed_categories(counts, eta, num_subcategories)   
+                l -= 1
+            elif (l in list(self.fixed_layers.keys())):
+                num_subcategories = self.fixed_layers[l]
+                labels =self.generate_fixed_categories(counts, eta, num_subcategories)               
             else:
                 with Pool(num_categories) as p:
                     params =list(itertools.product(counts.tolist(), [eta]))
                     labels = p.starmap(self.generate_CRP, params)
-            global_indices = torch.cat(indices, dim=0)
+            if (isinstance(indices, list)):
+                global_indices = torch.cat(indices, dim=0)
+            else:
+                global_indices = indices
             new_layer_label = torch.zeros(sample_size, dtype=torch.long)
-            print(torch.cat(labels, dim=0).shape)
             new_layer_label[global_indices] = torch.cat(labels, dim=0)
             label_hierarchy.append(new_layer_label)
 
@@ -255,8 +268,8 @@ class HierarchicalDirichletProcess:
             prev_indices = indices
             prev_unique_values = unique_values
             prev_counts = counts
-        print("labels", labels)
-        print("indices", indices)
+            l += 1
+
         return torch.stack(label_hierarchy, dim=0).t()
 
     def summarize_nCRP(self, label_hierarchy: torch.Tensor):
@@ -303,7 +316,7 @@ if __name__ == "__main__":
     # print(dp.get_values())
     # print(dp.get_weights())
 
-    hp = HierarchicalDirichletProcess(3, {1: 3})
+    hp = HierarchicalDirichletProcess(3, {2: 4})
     labels = hp.generate_nCRP(100, 1)
     print(labels)
     num_categories_per_layer = hp.summarize_nCRP(labels)
