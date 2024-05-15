@@ -28,7 +28,7 @@ class Categorical_Distribution:
     
 
 class DirichletProcess:
-    def __init__(self, alpha: float, base_distribution: Dict = None):
+    def __init__(self, alpha: float, sample_size: int, base_distribution: Dict = None):
         '''
         Initialize a Dirichlet Process with concentration parameter alpha
 
@@ -45,7 +45,9 @@ class DirichletProcess:
             self.base_distribution = Dirichlet(beta*torch.ones(10))
         else:
             self.base_distribution = Categorical_Distribution(base_distribution["weights"], base_distribution["values"])
-
+        
+        self.sample(sample_size)
+    
     def sample(self, num_samples: int):
         '''
         Sample from the Dirichlet Process
@@ -115,7 +117,7 @@ class HierarchicalDirichletProcess:
                     layer_index[i] = fixed_layers[i]
             for i in range(layers):
                 self.implied_constraints[i] = min(layer_index[i:])
-        self.categories_per_layer = torch.zeros(layers, dtype=torch.int32)
+        self.category_hierarchy = {}
 
     def summarize_CRP(self, labels: Union[torch.Tensor, list], indices: Union[torch.Tensor, list]):
         '''
@@ -283,6 +285,8 @@ class HierarchicalDirichletProcess:
         - unique_values (torch.Tensor): the unique values in the labels tensor or list of tensors (same value in different tensors are considered as different values)
         - counts (torch.Tensor): the counts of the unique values in the labels tensor or list of tensors (same value in different tensors are considered as different values)
         '''
+        category_hierarchy = {}
+
         num_categories_per_layer = {}
         for l in range(self.layers):
             unique_values = torch.unique(label_hierarchy[:, :l+1], dim=0)
@@ -291,23 +295,23 @@ class HierarchicalDirichletProcess:
             num_categories_per_layer[l] = unique_values.shape[0]
         return num_categories_per_layer
     
-    def generate_HDP(self):
+    def generate_HDP(self, sample_size: int):
         '''
         Generate a Hierarchical Dirichlet Process
         '''
         gamma = Gamma(1, 1).sample()
-        Global  = DirichletProcess(gamma)
+        Global = DirichletProcess(gamma, sample_size)
+        Global.sample(sample_size)
         HDP_distributions = []
+        HDP_distributions.append([Global])
         for l in range(self.layers):
             alpha = Gamma(1, 1).sample()
-            Local = DirichletProcess(alpha, Global.get_distribution())
-            Global.sample(1)
-            Local.sample(1)
-            print("Global values: ", Global.get_values())
-            print("Global weights: ", Global.get_weights())
-            print("Local values: ", Local.get_values())
-            print("Local weights: ", Local.get_weights())
-
+            base = HDP_distributions[-1]
+            param = list(itertools.product([alpha], [sample_size], base))
+            with Pool(len(base)) as p:
+                DPs = p.starmap(DirichletProcess, param)
+            child_distributions = [DP.get_distribution() for DP in DPs]
+            HDP_distributions.append(child_distributions)
 
 
 if __name__ == "__main__":
