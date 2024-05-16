@@ -117,7 +117,7 @@ class HierarchicalDirichletProcess:
                     layer_index[i] = fixed_layers[i]
             for i in range(layers):
                 self.implied_constraints[i] = min(layer_index[i:])
-        self.category_hierarchy = {}
+        self.category_hierarchy = []
 
     def summarize_CRP(self, labels: Union[torch.Tensor, list], indices: Union[torch.Tensor, list]):
         '''
@@ -134,16 +134,22 @@ class HierarchicalDirichletProcess:
         label_indices_list = []
         counts_list = []
         if (isinstance(labels, list)):
+            p_cat = 0
+            category_dict = {}
             for label, index in zip(labels, indices):
                 unique_values, inverse_indices, counts = torch.unique(label, return_inverse = True, return_counts=True)
+                category_dict[p_cat] = {val.item(): {} for val in unique_values}
+                p_cat += 1
                 for i in range(unique_values.shape[0]):
                     label_indices_list.append(index[torch.where(inverse_indices == i)])
                 unique_values_list.append(unique_values)
                 counts_list.append(counts)
             unique_values = torch.cat(unique_values_list, dim=0)
             counts = torch.cat(counts_list, dim=0)
+            self.category_hierarchy.append(category_dict)
         else:
             unique_values, inverse_indices, counts = torch.unique(labels, return_inverse = True, return_counts=True)
+            self.category_hierarchy.append({val.item(): {} for val in unique_values})
             for i in range(unique_values.shape[0]):
                 label_indices_list.append(indices[torch.where(inverse_indices == i)])
         return unique_values, label_indices_list, counts
@@ -285,7 +291,6 @@ class HierarchicalDirichletProcess:
         - unique_values (torch.Tensor): the unique values in the labels tensor or list of tensors (same value in different tensors are considered as different values)
         - counts (torch.Tensor): the counts of the unique values in the labels tensor or list of tensors (same value in different tensors are considered as different values)
         '''
-        category_hierarchy = {}
 
         num_categories_per_layer = {}
         for l in range(self.layers):
@@ -293,7 +298,9 @@ class HierarchicalDirichletProcess:
             print("layer: ", l)
             print("unique values: ", unique_values)
             num_categories_per_layer[l] = unique_values.shape[0]
+        unique_values = torch.unique(label_hierarchy, dim=0)
         return num_categories_per_layer
+    
     
     def generate_HDP(self, sample_size: int):
         '''
