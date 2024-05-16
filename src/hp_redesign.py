@@ -4,7 +4,7 @@ import itertools
 
 from pyro.distributions import Dirichlet, Gamma, Categorical
 from torch.multiprocessing import Pool
-from typing import Dict, Union
+from typing import Union
 
 
 class Categorical_Distribution:
@@ -28,7 +28,7 @@ class Categorical_Distribution:
     
 
 class DirichletProcess:
-    def __init__(self, alpha: float, sample_size: int, base_distribution: Dict = None):
+    def __init__(self, alpha: float, sample_size: int, base_distribution: dict = None):
         '''
         Initialize a Dirichlet Process with concentration parameter alpha
 
@@ -90,7 +90,7 @@ class DirichletProcess:
         return {"values": self.values, "weights": self.weights}
 
 class HierarchicalDirichletProcess:
-    def __init__(self, layers: int, fixed_layers: Dict = None):
+    def __init__(self, layers: int, fixed_layers: dict = None):
         '''
         Initialize a Hierarchical Dirichlet Process with layers
 
