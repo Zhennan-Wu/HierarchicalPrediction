@@ -8,7 +8,7 @@ from typing import Union
 
 
 class Categorical_Distribution:
-    def __init__(self, weights: list, values: list):
+    def __init__(self, weights: torch.Tensor, values: torch.Tensor):
         '''
         Initialize a Categorical Distribution with weights
 
@@ -16,15 +16,15 @@ class Categorical_Distribution:
         - weights (list): the weights of the values
         - values (list): the values of the Categorical Distribution
         '''
-        self.weights = torch.tensor(weights)
-        self.values = torch.tensor(values)
+        self.weights = weights
+        self.values = values
     
     def sample(self):
         '''
         Sample from the Categorical Distribution
         '''
         idx = Categorical(self.weights).sample()
-        return self.values[idx]
+        return self.values[idx.item()]
     
 
 class DirichletProcess:
@@ -87,7 +87,7 @@ class DirichletProcess:
         '''
         Get the distribution of the Dirichlet Process
         '''
-        return {"values": self.values, "weights": self.weights}
+        return {"values": torch.stack(self.values), "weights": torch.tensor(self.weights)}
 
 class HierarchicalDirichletProcess:
     def __init__(self, layers: int, fixed_layers: dict = None):
@@ -295,14 +295,49 @@ class HierarchicalDirichletProcess:
         num_categories_per_layer = {}
         for l in range(self.layers):
             unique_values = torch.unique(label_hierarchy[:, :l+1], dim=0)
-            print("layer: ", l)
-            print("unique values: ", unique_values)
+            # print("layer: ", l)
+            # print("unique values: ", unique_values)
             num_categories_per_layer[l] = unique_values.shape[0]
         unique_values = torch.unique(label_hierarchy, dim=0)
-        return num_categories_per_layer
+
+        hierarchy_tree = {}
+        for entry in label_hierarchy:
+            level = hierarchy_tree
+            for l, category in enumerate(entry):
+                if category.item() not in level:
+                    if (l == self.layers - 1):
+                        level[category.item()] = 1
+                    else:
+                        level[category.item()] = {}
+                else:
+                    if (l == self.layers - 1):
+                        level[category.item()] += 1
+                level = level[category.item()]
+
+        return num_categories_per_layer, hierarchy_tree
     
     
-    def generate_HDP(self, sample_size: int):
+    def _extract_child_layer(self, parent_layer: list):
+        '''
+        Extract the child layers from the parent layers
+
+        Parameters:
+        - parent_layer (list): the parent layer of list of hierarchical dictionaries
+
+        Returns:    
+        - child_layer (list): the child layer of list of hierarchical dictionaries
+        '''
+        child_layer = []
+        counts = []
+        for parent in parent_layer:
+            child = list(parent.values())
+            count = len(child)
+            child_layer = child_layer + child
+            counts.append(count)
+        return child_layer, counts
+        
+
+    def generate_HDP(self, sample_size: int, hierarchy_tree: dict):
         '''
         Generate a Hierarchical Dirichlet Process
         '''
@@ -310,15 +345,24 @@ class HierarchicalDirichletProcess:
         Global = DirichletProcess(gamma, sample_size)
         Global.sample(sample_size)
         HDP_distributions = []
-        HDP_distributions.append([Global])
+        HDP_distributions.append([Global.get_distribution()]*len(list(hierarchy_tree.keys())))
+        level = list(hierarchy_tree.values())
         for l in range(self.layers):
             alpha = Gamma(1, 1).sample()
             base = HDP_distributions[-1]
             param = list(itertools.product([alpha], [sample_size], base))
             with Pool(len(base)) as p:
                 DPs = p.starmap(DirichletProcess, param)
-            child_distributions = [DP.get_distribution() for DP in DPs]
-            HDP_distributions.append(child_distributions)
+            if (l < self.layers - 1):
+                level, counts = self._extract_child_layer(level)
+                child_distributions = []
+                if (len(counts) != len(DPs)):
+                    raise ValueError("The number of child layers {} should be equal to the number of Dirichlet Processes {}".format(len(counts), len(DPs)))
+                for count, DP in zip(counts, DPs):
+                    next_base = [DP.get_distribution()]*count
+                    child_distributions = child_distributions + next_base
+                HDP_distributions.append(child_distributions)
+        return HDP_distributions
 
 
 if __name__ == "__main__":
@@ -329,6 +373,9 @@ if __name__ == "__main__":
 
     hp = HierarchicalDirichletProcess(3, {2: 4})
     labels = hp.generate_nCRP(100, 1)
-    print(labels)
-    num_categories_per_layer = hp.summarize_nCRP(labels)
-    print(num_categories_per_layer)
+    # print(labels)
+    num_categories_per_layer, hierarchy_tree = hp.summarize_nCRP(labels)
+    # print(num_categories_per_layer)
+    # print(hierarchy_tree)
+    hdp = hp.generate_HDP(100, hierarchy_tree)
+    print(hdp)
