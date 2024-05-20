@@ -1,6 +1,8 @@
 import torch
 import pyro
 import itertools
+import jax
+import jax.numpy as jnp
 
 from pyro.distributions import Dirichlet, Gamma, Categorical
 from torch.multiprocessing import Pool
@@ -329,12 +331,18 @@ class HierarchicalDirichletProcess:
         '''
         child_layer = []
         counts = []
+        child_sample_sizes = []
         for parent in parent_layer:
             child = list(parent.values())
+            sample_size = []
+            for c in child:
+                leaves = jax.tree_util.tree_leaves(c)
+                sample_size.append(sum(leaves))
+            child_sample_sizes = child_sample_sizes + sample_size
             count = len(child)
             child_layer = child_layer + child
             counts.append(count)
-        return child_layer, counts
+        return child_layer, child_sample_sizes, counts
 
     def generate_HDP(self, sample_size: int, hierarchy_tree: dict):
         '''
@@ -342,18 +350,26 @@ class HierarchicalDirichletProcess:
         '''
         gamma = Gamma(1, 1).sample()
         Global = DirichletProcess(gamma, sample_size)
-        Global.sample(sample_size)
         HDP_distributions = []
+        HDP_sample_sizes = []
         HDP_distributions.append([Global.get_distribution()]*len(list(hierarchy_tree.keys())))
+        sample_sizes = []
+        for c in list(hierarchy_tree.values()):
+            leaves = jax.tree_util.tree_leaves(c)
+            sample_sizes.append(sum(leaves))
+        HDP_sample_sizes.append(sample_sizes)
         level = list(hierarchy_tree.values())
         for l in range(self.layers):
             alpha = Gamma(1, 1).sample()
             base = HDP_distributions[-1]
-            param = list(itertools.product([alpha], [sample_size], base))
+            base_sample_sizes = HDP_sample_sizes[-1]
+            print("sample sizes", base_sample_sizes)
+            alpha_list = [alpha.item()]*len(base_sample_sizes)
+            param = list(zip(alpha_list, base_sample_sizes, base))
             with Pool(len(base)) as p:
                 DPs = p.starmap(DirichletProcess, param)
             if (l < self.layers - 1):
-                level, counts = self._extract_child_layer(level)
+                level, sample_sizes, counts = self._extract_child_layer(level)
                 child_distributions = []
                 if (len(counts) != len(DPs)):
                     raise ValueError("The number of child layers {} should be equal to the number of Dirichlet Processes {}".format(len(counts), len(DPs)))
@@ -361,6 +377,7 @@ class HierarchicalDirichletProcess:
                     next_base = [DP.get_distribution()]*count
                     child_distributions = child_distributions + next_base
                 HDP_distributions.append(child_distributions)
+                HDP_sample_sizes.append(sample_sizes)
         return HDP_distributions
 
 
