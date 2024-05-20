@@ -89,6 +89,7 @@ class DirichletProcess:
         '''
         return {"values": torch.stack(self.values), "weights": torch.tensor(self.weights)}
 
+
 class HierarchicalDirichletProcess:
     def __init__(self, layers: int, fixed_layers: dict = None):
         '''
@@ -316,7 +317,6 @@ class HierarchicalDirichletProcess:
 
         return num_categories_per_layer, hierarchy_tree
     
-    
     def _extract_child_layer(self, parent_layer: list):
         '''
         Extract the child layers from the parent layers
@@ -335,7 +335,6 @@ class HierarchicalDirichletProcess:
             child_layer = child_layer + child
             counts.append(count)
         return child_layer, counts
-        
 
     def generate_HDP(self, sample_size: int, hierarchy_tree: dict):
         '''
