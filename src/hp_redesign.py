@@ -342,6 +342,8 @@ class HierarchicalDirichletProcess:
             count = len(child)
             child_layer = child_layer + child
             counts.append(count)
+        print("Parent layer: ", parent_layer)
+        print("Child layer: ", child_layer)
         return child_layer, child_sample_sizes, counts
 
     def generate_HDP(self, sample_size: int, hierarchy_tree: dict):
@@ -368,7 +370,7 @@ class HierarchicalDirichletProcess:
             param = list(zip(alpha_list, base_sample_sizes, base))
             with Pool(len(base)) as p:
                 DPs = p.starmap(DirichletProcess, param)
-            if (l < self.layers - 1):
+            if (l < self.layers):
                 level, sample_sizes, counts = self._extract_child_layer(level)
                 child_distributions = []
                 if (len(counts) != len(DPs)):
@@ -379,6 +381,12 @@ class HierarchicalDirichletProcess:
                 HDP_distributions.append(child_distributions)
                 HDP_sample_sizes.append(sample_sizes)
         return HDP_distributions
+
+    def infer_HDP(self, HDP_distributions: list):
+        '''
+        Infer the Hierarchical Dirichlet Process
+        '''
+        pass
 
 
 if __name__ == "__main__":
@@ -395,3 +403,4 @@ if __name__ == "__main__":
     # print(hierarchy_tree)
     hdp = hp.generate_HDP(100, hierarchy_tree)
     print(hdp)
+    print(len(hdp))
