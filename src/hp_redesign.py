@@ -23,7 +23,7 @@ class Categorical_Distribution:
     
     def sample(self):
         '''
-        Sample from the Categorical Distribution
+        Sample from the Categorical Distribution 
         '''
         idx = Categorical(self.weights).sample()
         return self.values[idx.item()]
@@ -342,8 +342,6 @@ class HierarchicalDirichletProcess:
             count = len(child)
             child_layer = child_layer + child
             counts.append(count)
-        print("Parent layer: ", parent_layer)
-        print("Child layer: ", child_layer)
         return child_layer, child_sample_sizes, counts
 
     def generate_HDP(self, sample_size: int, hierarchy_tree: dict):
@@ -365,12 +363,11 @@ class HierarchicalDirichletProcess:
             alpha = Gamma(1, 1).sample()
             base = HDP_distributions[-1]
             base_sample_sizes = HDP_sample_sizes[-1]
-            print("sample sizes", base_sample_sizes)
             alpha_list = [alpha.item()]*len(base_sample_sizes)
             param = list(zip(alpha_list, base_sample_sizes, base))
             with Pool(len(base)) as p:
                 DPs = p.starmap(DirichletProcess, param)
-            if (l < self.layers):
+            if (l < self.layers - 1):
                 level, sample_sizes, counts = self._extract_child_layer(level)
                 child_distributions = []
                 if (len(counts) != len(DPs)):
@@ -380,7 +377,31 @@ class HierarchicalDirichletProcess:
                     child_distributions = child_distributions + next_base
                 HDP_distributions.append(child_distributions)
                 HDP_sample_sizes.append(sample_sizes)
+            else:
+                sample_sizes = level
+                counts = [1]*len(level)
+                child_distributions = []
+                if (len(counts) != len(DPs)):
+                    raise ValueError("The number of child layers {} should be equal to the number of Dirichlet Processes {}".format(len(counts), len(DPs)))
+                for count, DP in zip(counts, DPs):
+                    next_base = [DP.get_distribution()]*count
+                    child_distributions = child_distributions + next_base
+                HDP_distributions.append(child_distributions)
+                HDP_sample_sizes.append(sample_sizes)
+
         return HDP_distributions
+
+    def visualize_HDP(self, HDP_distributions: list, labels: torch.Tensor):
+        '''
+        Visualize the Hierarchical Dirichlet Process
+        '''
+        for l, distributions in enumerate(HDP_distributions):
+            print("Layer: ", l)
+            print("Number of subclass: ", len(distributions))
+            print("Number of ")
+            for d in distributions:
+                print("Values: ", d["values"])
+                print("Weights: ", d["weights"])
 
     def infer_HDP(self, HDP_distributions: list):
         '''
@@ -400,7 +421,6 @@ if __name__ == "__main__":
     # print(labels)
     num_categories_per_layer, hierarchy_tree = hp.summarize_nCRP(labels)
     # print(num_categories_per_layer)
-    # print(hierarchy_tree)
+    print(hierarchy_tree)
     hdp = hp.generate_HDP(100, hierarchy_tree)
-    print(hdp)
-    print(len(hdp))
+    hp.visualize_HDP(hdp, labels)
