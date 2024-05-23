@@ -186,9 +186,9 @@ class HierarchicalDirichletProcess:
         Generate a Chinese Restaurant Process with sample size sample_size and concentration parameter eta with fixed number of categories
 
         Parameters:
-        - sample_size (int): the number of samples to generate labels for
+        - parent_categories_counts (torch.Tensor): the number of samples in each parent category
         - eta (float): the concentration parameter of the Chinese Restaurant Process
-        - num_categories (int): the number of categories to generate
+        - num_categories (int): the number of child categories to generate
 
         Returns:
         - labels (torch.Tensor): the labels of the samples
@@ -196,6 +196,7 @@ class HierarchicalDirichletProcess:
         num_parent_categories = parent_categories_counts.shape[0]
         if (num_categories < num_parent_categories):
             raise ValueError("The number of child categories should be greater than the number of parent categories")
+        # Randomly assign child categories to parent categories
         child_categories = list(range(num_categories))
         child_categories = [[x] for x in child_categories]
         parent_child_relation = dict(zip(list(range(num_categories)),child_categories))
@@ -206,10 +207,16 @@ class HierarchicalDirichletProcess:
         parent_categories_counts = parent_categories_counts.to(torch.int).tolist()
         parent_child_list = list(parent_child_relation.values())
 
+        # Generate instances based on the assigned parent-child categories
         labels = []
         for p_count, p_c in zip(parent_categories_counts, parent_child_list):
+            # Generate the first instance under the parent category
             p_labels = []
-            for _ in range(p_count):
+            candidates = list(set(p_c) - set(p_labels))
+            new_label = candidates[torch.randint(0, len(candidates), (1,)).item()]
+            p_labels.append(new_label)      
+            # Chinese resutaurant process to generate the rest of the instances      
+            for _ in range(p_count-1):
                 counts = len(set(p_labels))
                 candidates = list(set(p_c) - set(p_labels))
                 if (torch.rand(1) < eta/(eta + counts) and len(candidates) > 0):
@@ -217,8 +224,9 @@ class HierarchicalDirichletProcess:
                     new_label = candidates[torch.randint(0, len(candidates), (1,)).item()]
                     p_labels.append(new_label)
                 else:
-                    # Select an existing label
-                    new_label = p_labels[torch.randint(0, len(p_labels), (1,)).item()]
+                    unique_values, counts = torch.unique(torch.tensor(p_labels), return_counts=True)
+                    new_label_index = Categorical(counts).sample().item()
+                    new_label = unique_values[new_label_index].item()
                     p_labels.append(new_label)
             labels.append(torch.tensor(p_labels))
 
