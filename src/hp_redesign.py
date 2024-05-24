@@ -306,10 +306,7 @@ class HierarchicalDirichletProcess:
         num_categories_per_layer = {}
         for l in range(self.layers):
             unique_values = torch.unique(label_hierarchy[:, :l+1], dim=0)
-            # print("layer: ", l)
-            # print("unique values: ", unique_values)
             num_categories_per_layer[l] = unique_values.shape[0]
-        unique_values = torch.unique(label_hierarchy, dim=0)
 
         hierarchy_tree = {}
         for entry in label_hierarchy:
