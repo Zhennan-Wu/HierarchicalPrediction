@@ -413,6 +413,12 @@ class HierarchicalDirichletProcess:
         Infer the Hierarchical Dirichlet Process
         '''
         pass
+    
+    def match_HDP(self, HDP_distributions: list, hierarchy_tree: dict):
+        '''
+        Match the Hierarchical Dirichlet Process
+        '''
+        pass
 
 
 if __name__ == "__main__":
