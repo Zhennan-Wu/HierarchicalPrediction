@@ -66,12 +66,18 @@ class DirichletProcess:
                 # Select existing sample
                 idx = Categorical(probs).sample()
                 self.weights[idx] += 1
-                new_entry = self.values[idx]
             else:
                 # Sample from the base distribution
                 new_entry = self.base_distribution.sample()
-                self.values.append(new_entry)
-                self.weights.append(1)
+                unseen = True
+                for index, entry in enumerate(self.values):
+                    if (torch.equal(entry, new_entry)):
+                        self.weights[index] += 1
+                        unseen = False
+                        break
+                if (unseen):
+                    self.values.append(new_entry)
+                    self.weights.append(1)
     
     def get_values(self):
         '''
@@ -355,6 +361,7 @@ class HierarchicalDirichletProcess:
         '''
         gamma = Gamma(1, 1).sample()
         Global = DirichletProcess(gamma, sample_size)
+        HDP_structure = []
         HDP_distributions = []
         HDP_sample_sizes = []
         HDP_distributions.append([Global.get_distribution()]*len(list(hierarchy_tree.keys())))
@@ -428,10 +435,13 @@ if __name__ == "__main__":
     # print(dp.get_weights())
 
     hp = HierarchicalDirichletProcess(3, {2: 4})
-    labels = hp.generate_nCRP(100, 1)
-    # print(labels)
+    labels = hp.generate_nCRP(50, 1)
+    print("labels")
+    print(labels)
     num_categories_per_layer, hierarchy_tree = hp.summarize_nCRP(labels)
-    # print(num_categories_per_layer)
+    print("num_categories_per_layer")
+    print(num_categories_per_layer)
+    print("hierarchy_tree")
     print(hierarchy_tree)
     hdp = hp.generate_HDP(100, hierarchy_tree)
     hp.visualize_HDP(hdp, labels)
