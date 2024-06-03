@@ -360,7 +360,7 @@ class HierarchicalDirichletProcess:
         Generate a Hierarchical Dirichlet Process
         '''
         gamma = Gamma(1, 1).sample()
-        Global = DirichletProcess(gamma, sample_size)
+        Global = DirichletProcess(gamma, sample_size) 
         HDP_structure = []
         HDP_distributions = []
         HDP_sample_sizes = []
