@@ -371,7 +371,7 @@ class HierarchicalDirichletProcess:
             for key, count in zip(parent_keys, counts):
                 child_key =  []
                 for c in range(count):
-                    child_key.append(key + str(c))
+                    child_key.append(str(key) + str(c))
                 child_keys = child_keys + child_key
             if (len(child_keys) != len(Distributions)):
                 raise ValueError("The number of child keys {} should be equal to the number of Distributions {}".format(len(child_keys), len(Distributions)))
@@ -404,9 +404,11 @@ class HierarchicalDirichletProcess:
             with Pool(len(base)) as p:
                 DPs = p.starmap(DirichletProcess, param)
             if (l == 0):
-                HDP_structure.append(self.update_hierarchy_dict(DPs))
+                HDP_structure.append(self.update_hierarchy_dict(DPs, counts))
             else:
-                HDP_structure.append(self.update_hierarchy_dict(DPs, HDP_structure[-1]))
+                HDP_structure.append(self.update_hierarchy_dict(DPs, counts, HDP_structure[-1]))
+            print("HDP_structure")
+            print(HDP_structure)
             if (l < self.layers - 1):
                 level, sample_sizes, counts = self._extract_child_layer(level)
                 child_distributions = []
