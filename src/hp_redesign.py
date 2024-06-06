@@ -355,6 +355,29 @@ class HierarchicalDirichletProcess:
             counts.append(count)
         return child_layer, child_sample_sizes, counts
 
+    def update_hierarchy_dict(self, Distributions: list, counts: list, parent_hierarchy: dict = None):
+        '''
+        Update the hierarchy tree with the distributions
+        '''
+        child_dict = {}
+        if (parent_hierarchy is None):
+            child_keys = list(range(len(Distributions)))
+            child_dict = dict(zip(child_keys, Distributions))
+        else:
+            parent_keys = list(parent_hierarchy.keys())
+            if (len(parent_keys) != len(counts)):
+                raise ValueError("The number of parent keys {} should be equal to the number of counts {}".format(len(parent_keys), len(counts)))
+            child_keys = []
+            for key, count in zip(parent_keys, counts):
+                child_key =  []
+                for c in range(count):
+                    child_key.append(key + str(c))
+                child_keys = child_keys + child_key
+            if (len(child_keys) != len(Distributions)):
+                raise ValueError("The number of child keys {} should be equal to the number of Distributions {}".format(len(child_keys), len(Distributions)))
+            child_dict = dict(zip(child_keys, Distributions))
+        return child_dict
+
     def generate_HDP(self, sample_size: int, hierarchy_tree: dict):
         '''
         Generate a Hierarchical Dirichlet Process
@@ -364,7 +387,8 @@ class HierarchicalDirichletProcess:
         HDP_structure = []
         HDP_distributions = []
         HDP_sample_sizes = []
-        HDP_distributions.append([Global.get_distribution()]*len(list(hierarchy_tree.keys())))
+        counts = [len(list(hierarchy_tree.keys()))]
+        HDP_distributions.append([Global.get_distribution()]*counts[0])
         sample_sizes = []
         for c in list(hierarchy_tree.values()):
             leaves = jax.tree_util.tree_leaves(c)
@@ -379,6 +403,10 @@ class HierarchicalDirichletProcess:
             param = list(zip(alpha_list, base_sample_sizes, base))
             with Pool(len(base)) as p:
                 DPs = p.starmap(DirichletProcess, param)
+            if (l == 0):
+                HDP_structure.append(self.update_hierarchy_dict(DPs))
+            else:
+                HDP_structure.append(self.update_hierarchy_dict(DPs, HDP_structure[-1]))
             if (l < self.layers - 1):
                 level, sample_sizes, counts = self._extract_child_layer(level)
                 child_distributions = []
