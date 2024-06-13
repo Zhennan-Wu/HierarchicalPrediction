@@ -1,3 +1,8 @@
+#############################################################################################################################################################
+# To Do:
+# - Change the hierarchical Dirichlet processes from distribution based to index based
+# - Implement parallel Gibbs sampling for inference
+# 
 import torch
 import pyro
 import itertools
