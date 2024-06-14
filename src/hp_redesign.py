@@ -35,7 +35,7 @@ class Categorical_Distribution:
     
 
 class DirichletProcess:
-    def __init__(self, alpha: float, sample_size: int, base_distribution: dict = None):
+    def __init__(self, alpha: float, sample_size: int, base_distribution: dict):
         '''
         Initialize a Dirichlet Process with concentration parameter alpha
 
@@ -46,13 +46,7 @@ class DirichletProcess:
         self.alpha = alpha
         self.values = []
         self.weights = []
-        if (base_distribution is None):
-            # The dimension of the base distribution should be set according to the dimension of the top hidden layer in the Deep Boltzmann Machine
-            beta = Gamma(1, 1).sample()
-            self.base_distribution = Dirichlet(beta*torch.ones(10))
-        else:
-            self.base_distribution = Categorical_Distribution(base_distribution["weights"], base_distribution["values"])
-        
+        self.base_distribution = Categorical_Distribution(base_distribution["weights"], base_distribution["values"])
         self.sample(sample_size)
     
     def sample(self, num_samples: int):
@@ -115,23 +109,71 @@ class HierarchicalDirichletProcess:
         self.layer_constrains = False
         self.implied_constraints = None
         self.fixed_layers = fixed_layers
-        if (fixed_layers is not None):
-            fix_keys = list(fixed_layers.keys())
-            fix_values = list(fixed_layers.values())
+        self._check_layer_constraints()
+
+        self.category_hierarchy = []
+        # Initialize Global Dirichlet Process
+        self.global_dist, self.true_params = self.generate_Global_DP(10, 10, 1)
+    
+    def _check_layer_constraints(self):
+        '''
+        Check if the layer constraints are satisfied
+        '''
+        if (self.fixed_layers is not None):
+            fix_keys = list(self.fixed_layers.keys())
+            fix_values = list(self.fixed_layers.values())
             if (len(fix_keys) > 1):
                 if (all(fix_keys[i] <= fix_keys[i+1] for i in range(len(fix_keys)-1))):
                     raise ValueError("The fixed layers should be in increasing order, get {}".format(fix_keys))
                 if (all(fix_values[i] <= fix_values[i+1] for i in range(len(fix_values)-1))):
                     raise ValueError("The fixed layers should have increasing number of categories, get{}".format(fix_values))
             self.layer_constrains = True
-            layer_index = [float('inf')]*layers
+            layer_index = [float('inf')]*self.layers
             self.implied_constraints = {}
-            for i in range(layers):
-                if (i in fixed_layers.keys()):
-                    layer_index[i] = fixed_layers[i]
-            for i in range(layers):
+            for i in range(self.layers):
+                if (i in self.fixed_layers.keys()):
+                    layer_index[i] = self.fixed_layers[i]
+            for i in range(self.layers):
                 self.implied_constraints[i] = min(layer_index[i:])
-        self.category_hierarchy = []
+        
+    def generate_Global_DP(self, dimension: int, num_samples: int, gamma: float):
+        '''
+        Generate a Global Dirichlet Process with num_categories and concentration parameter gamma
+
+        Parameters:
+        - num_categories (int): the number of categories to generate
+        - gamma (float): the concentration parameter of the Global Dirichlet Process
+
+        Returns:
+        - values (torch.Tensor): the values of the Global Dirichlet Process
+        - weights (torch.Tensor): the weights of the values in the Global Dirichlet Process
+        '''
+        weights = []
+        values = []
+        base_param = Gamma(1, 1).sample()
+        base_distribution = Dirichlet(base_param * torch.ones(dimension))
+        for _ in range(num_samples):
+            total_counts = sum(weights)
+            probs = torch.tensor(weights) / total_counts
+            p_existing = gamma / (gamma + total_counts)
+            if (torch.rand(1) > p_existing):
+                # Select existing sample
+                idx = Categorical(probs).sample()
+                weights[idx] += 1
+            else:
+                # Sample from the base distribution
+                new_entry = base_distribution.sample()
+                unseen = True
+                for index, entry in enumerate(values):
+                    if (torch.equal(entry, new_entry)):
+                        weights[index] += 1
+                        unseen = False
+                        break
+                if (unseen):
+                    values.append(new_entry)
+                    weights.append(1)
+        base_dist = {"values": torch.arange(len(weights)), "weights": torch.tensor(weights)}
+        return base_dist, torch.stack(values)
 
     def summarize_CRP(self, labels: Union[torch.Tensor, list], indices: Union[torch.Tensor, list]):
         '''
@@ -388,7 +430,7 @@ class HierarchicalDirichletProcess:
         Generate a Hierarchical Dirichlet Process
         '''
         gamma = Gamma(1, 1).sample()
-        Global = DirichletProcess(gamma, sample_size) 
+        Global = DirichletProcess(gamma, sample_size, self.global_dist) 
         HDP_structure = []
         HDP_distributions = []
         HDP_sample_sizes = []
