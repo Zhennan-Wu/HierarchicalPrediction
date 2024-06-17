@@ -1,6 +1,5 @@
-#############################################################################################################################################################
+#############################################################################################################
 # To Do:
-# - Change the hierarchical Dirichlet processes from distribution based to index based
 # - Implement parallel Gibbs sampling for inference
 # 
 import torch
@@ -98,12 +97,15 @@ class DirichletProcess:
 
 
 class HierarchicalDirichletProcess:
-    def __init__(self, layers: int, fixed_layers: dict = None):
+    def __init__(self, num_of_words: int, layers: int, fixed_layers: dict = None, global_sample_size: int = 100):
         '''
         Initialize a Hierarchical Dirichlet Process with layers
 
         Parameters:
+        - num_of_words (int): the number of words in the vocabulary
         - layers (int): the number of layers in the Hierarchical Dirichlet Process
+        - fixed_layers (dict): the fixed number of categories in each layer
+        - global_sample_size (int): the number of samples to draw from the Global Dirichlet Process
         '''
         self.layers = layers
         self.layer_constrains = False
@@ -113,7 +115,7 @@ class HierarchicalDirichletProcess:
 
         self.category_hierarchy = []
         # Initialize Global Dirichlet Process
-        self.global_dist, self.true_params = self.generate_Global_DP(10, 10, 1)
+        self.global_dist, self.true_params = self.generate_Global_DP(num_of_words, global_sample_size, 1)
     
     def _check_layer_constraints(self):
         '''
@@ -173,7 +175,8 @@ class HierarchicalDirichletProcess:
                     values.append(new_entry)
                     weights.append(1)
         base_dist = {"values": torch.arange(len(weights)), "weights": torch.tensor(weights)}
-        return base_dist, torch.stack(values)
+        ground_truth = torch.stack(values)
+        return base_dist, ground_truth
 
     def summarize_CRP(self, labels: Union[torch.Tensor, list], indices: Union[torch.Tensor, list]):
         '''
@@ -230,8 +233,8 @@ class HierarchicalDirichletProcess:
                 labels = torch.cat((labels, new_label.unsqueeze(0)), dim=0)
             else:
                 # Select an existing label
-                new_label = Categorical(counts).sample().item()
-                labels = torch.cat((labels, torch.tensor([new_label])), dim=0)
+                new_label = Categorical(counts).sample()
+                labels = torch.cat((labels, new_label.unsqueeze(0)), dim=0)
         return labels
 
     def generate_fixed_categories(self, parent_categories_counts: torch.Tensor, eta: float, num_categories: int):
@@ -265,24 +268,26 @@ class HierarchicalDirichletProcess:
         for p_count, p_c in zip(parent_categories_counts, parent_child_list):
             # Generate the first instance under the parent category
             p_labels = []
-            candidates = list(set(p_c) - set(p_labels))
+            p_labels_record = []
+            candidates = p_c
             new_label = candidates[torch.randint(0, len(candidates), (1,)).item()]
-            p_labels.append(new_label)      
+            p_labels_record.append(new_label) 
+            p_labels.append(0)    
             # Chinese resutaurant process to generate the rest of the instances      
             for _ in range(p_count-1):
-                counts = len(set(p_labels))
-                candidates = list(set(p_c) - set(p_labels))
+                counts = len(set(p_labels_record))
+                candidates = list(set(p_c) - set(p_labels_record))
                 if (torch.rand(1) < eta/(eta + counts) and len(candidates) > 0):
                     # Add a new label
                     new_label = candidates[torch.randint(0, len(candidates), (1,)).item()]
-                    p_labels.append(new_label)
+                    p_labels_record.append(new_label)
+                    p_labels.append(max(p_labels)+1)
                 else:
                     unique_values, counts = torch.unique(torch.tensor(p_labels), return_counts=True)
                     new_label_index = Categorical(counts).sample().item()
                     new_label = unique_values[new_label_index].item()
                     p_labels.append(new_label)
             labels.append(torch.tensor(p_labels))
-
         return labels
     
     def generate_nCRP(self, sample_size: int, eta: float):
@@ -402,14 +407,18 @@ class HierarchicalDirichletProcess:
             counts.append(count)
         return child_layer, child_sample_sizes, counts
 
-    def update_hierarchy_dict(self, Distributions: list, counts: list, parent_hierarchy: dict = None):
+    def update_hierarchy_dict(self, Distributions: list, counts: list, labels: torch.Tensor, parent_hierarchy: dict = None):
         '''
         Update the hierarchy tree with the distributions
         '''
         child_dict = {}
+        distribution_params = []
+        for d in Distributions:
+            distribution_params.append(d.get_distribution())
         if (parent_hierarchy is None):
             child_keys = list(range(len(Distributions)))
-            child_dict = dict(zip(child_keys, Distributions))
+            child_keys = [str(key) for key in child_keys]
+            child_dict = dict(zip(child_keys, distribution_params))
         else:
             parent_keys = list(parent_hierarchy.keys())
             if (len(parent_keys) != len(counts)):
@@ -422,10 +431,10 @@ class HierarchicalDirichletProcess:
                 child_keys = child_keys + child_key
             if (len(child_keys) != len(Distributions)):
                 raise ValueError("The number of child keys {} should be equal to the number of Distributions {}".format(len(child_keys), len(Distributions)))
-            child_dict = dict(zip(child_keys, Distributions))
+            child_dict = dict(zip(child_keys, distribution_params))
         return child_dict
 
-    def generate_HDP(self, sample_size: int, hierarchy_tree: dict):
+    def generate_HDP(self, sample_size: int, hierarchy_tree: dict, labels: torch.Tensor):
         '''
         Generate a Hierarchical Dirichlet Process
         '''
@@ -451,11 +460,9 @@ class HierarchicalDirichletProcess:
             with Pool(len(base)) as p:
                 DPs = p.starmap(DirichletProcess, param)
             if (l == 0):
-                HDP_structure.append(self.update_hierarchy_dict(DPs, counts))
+                HDP_structure.append(self.update_hierarchy_dict(DPs, counts, labels))
             else:
-                HDP_structure.append(self.update_hierarchy_dict(DPs, counts, HDP_structure[-1]))
-            print("HDP_structure")
-            print(HDP_structure)
+                HDP_structure.append(self.update_hierarchy_dict(DPs, counts, labels, HDP_structure[-1]))
             if (l < self.layers - 1):
                 level, sample_sizes, counts = self._extract_child_layer(level)
                 child_distributions = []
@@ -477,9 +484,22 @@ class HierarchicalDirichletProcess:
                     child_distributions = child_distributions + next_base
                 HDP_distributions.append(child_distributions)
                 HDP_sample_sizes.append(sample_sizes)
-
+        self._check_nCRP_HDP_match(labels, HDP_structure)
         return HDP_distributions
 
+    def _check_nCRP_HDP_match(self, nCRP_hierarchy: torch.Tensor, HDP_hierarchy: list):
+        '''
+        Check if the nCRP and HDP hierarchies match
+        '''
+        for idx, level_HDP in enumerate(HDP_hierarchy):
+            level_nCRP = nCRP_hierarchy[:, :idx+1]
+            level_nCRP_list = level_nCRP.tolist()
+            level_nCRP_keys = [''.join(map(str, row)) for row in level_nCRP_list]
+            for key in level_nCRP_keys:
+                if key not in level_HDP.keys():
+                    raise ValueError("The nCRP hierarchy {} does not match the HDP hierarchy {}".format(key, list(level_HDP.keys())))
+        print("The nCRP hierarchy matches the HDP hierarchy")
+        
     def visualize_HDP(self, HDP_distributions: list, labels: torch.Tensor):
         '''
         Visualize the Hierarchical Dirichlet Process
@@ -487,11 +507,9 @@ class HierarchicalDirichletProcess:
         for l, distributions in enumerate(HDP_distributions):
             print("Layer: ", l)
             print("Number of subclass: ", len(distributions))
-            print("Number of ")
             for d in distributions:
-                print("Values: ", d["values"])
-                print("Weights: ", d["weights"])
-
+                print("Values: ", d["values"], "Weights: ", d["weights"])
+        
     def infer_HDP(self, HDP_distributions: list):
         '''
         Infer the Hierarchical Dirichlet Process
@@ -511,7 +529,7 @@ if __name__ == "__main__":
     # print(dp.get_values())
     # print(dp.get_weights())
 
-    hp = HierarchicalDirichletProcess(3, {2: 4})
+    hp = HierarchicalDirichletProcess(10, 3, {2: 10})
     labels = hp.generate_nCRP(50, 1)
     print("labels")
     print(labels)
@@ -520,5 +538,5 @@ if __name__ == "__main__":
     print(num_categories_per_layer)
     print("hierarchy_tree")
     print(hierarchy_tree)
-    hdp = hp.generate_HDP(100, hierarchy_tree)
+    hdp = hp.generate_HDP(100, hierarchy_tree, labels)
     hp.visualize_HDP(hdp, labels)
