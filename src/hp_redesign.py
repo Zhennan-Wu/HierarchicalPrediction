@@ -115,7 +115,7 @@ class HierarchicalDirichletProcess:
 
         self.category_hierarchy = []
         # Initialize Global Dirichlet Process
-        self.global_dist, self.true_params = self.generate_Global_DP(num_of_words, global_sample_size, 1)
+        self.global_dist, self.true_params = self.generate_Global_DP(num_of_words, global_sample_size, 100)
     
     def _check_layer_constraints(self):
         '''
@@ -174,7 +174,12 @@ class HierarchicalDirichletProcess:
                 if (unseen):
                     values.append(new_entry)
                     weights.append(1)
+        print("Global Dirichlet Process")
+        print("Values: ", values)
+        print("Weights: ", weights)
         base_dist = {"values": torch.arange(len(weights)), "weights": torch.tensor(weights)}
+        print("Base Distribution")
+        print(base_dist)
         ground_truth = torch.stack(values)
         return base_dist, ground_truth
 
@@ -439,7 +444,8 @@ class HierarchicalDirichletProcess:
         Generate a Hierarchical Dirichlet Process
         '''
         gamma = Gamma(1, 1).sample()
-        Global = DirichletProcess(gamma, sample_size, self.global_dist) 
+        print(self.global_dist)
+        Global = DirichletProcess(gamma, 10*sample_size, self.global_dist) 
         HDP_structure = []
         HDP_distributions = []
         HDP_sample_sizes = []
@@ -454,6 +460,8 @@ class HierarchicalDirichletProcess:
         for l in range(self.layers):
             alpha = Gamma(1, 1).sample()
             base = HDP_distributions[-1]
+            print("base distribution")
+            print(base)
             base_sample_sizes = HDP_sample_sizes[-1]
             alpha_list = [alpha.item()]*len(base_sample_sizes)
             param = list(zip(alpha_list, base_sample_sizes, base))
