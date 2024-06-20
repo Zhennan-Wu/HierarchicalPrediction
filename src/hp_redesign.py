@@ -97,7 +97,7 @@ class DirichletProcess:
 
 
 class HierarchicalDirichletProcess:
-    def __init__(self, num_of_words: int, layers: int, fixed_layers: dict = None, global_sample_size: int = 100):
+    def __init__(self, num_of_words: int, layers: int, sample_size: int, fixed_layers: dict = None, global_sample_size: int = 100):
         '''
         Initialize a Hierarchical Dirichlet Process with layers
 
@@ -115,7 +115,14 @@ class HierarchicalDirichletProcess:
 
         self.category_hierarchy = []
         # Initialize Global Dirichlet Process
-        self.global_dist, self.true_params = self.generate_Global_DP(num_of_words, global_sample_size, 100)
+        gamma = 100
+        self.global_dist, self.true_params = self.generate_Global_DP(num_of_words, global_sample_size, gamma)
+
+        # Initialize HDP variables (not finished yet)
+        eta = Gamma.sample(1, 1)
+        self.labels = self.generate_nCRP(sample_size, eta)
+        self.num_categories_per_layer, self.hierarchy_tree = self.summarize_nCRP(self.labels)
+        self.hdp = self.generate_HDP(sample_size, self.hierarchy_tree, self.labels)
     
     def _check_layer_constraints(self):
         '''
@@ -517,11 +524,18 @@ class HierarchicalDirichletProcess:
             print("Number of subclass: ", len(distributions))
             for d in distributions:
                 print("Values: ", d["values"], "Weights: ", d["weights"])
+    
+    def calculate_likelihood(self, HDP_distributions: list, labels: torch.Tensor):
+        '''
+        Calculate the likelihood of the Hierarchical Dirichlet Process
+        '''
+        pass
+
+    def infer_HDP(self, HDP_distributions: list, labels: torch.Tensor):
+        '''
+        Infer the Hierarchical Dirichlet Process layer by layer
+        '''
         
-    def infer_HDP(self, HDP_distributions: list):
-        '''
-        Infer the Hierarchical Dirichlet Process
-        '''
         pass
     
     def match_HDP(self, HDP_distributions: list, hierarchy_tree: dict):
