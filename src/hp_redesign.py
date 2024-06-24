@@ -525,7 +525,7 @@ class HierarchicalDirichletProcess:
             for d in distributions:
                 print("Values: ", d["values"], "Weights: ", d["weights"])
     
-    def calculate_likelihood(self, HDP_distributions: list, labels: torch.Tensor):
+    def calculate_likelihood(self, variable_indices, HDP_distributions: list, labels: torch.Tensor):
         '''
         Calculate the likelihood of the Hierarchical Dirichlet Process
         '''
