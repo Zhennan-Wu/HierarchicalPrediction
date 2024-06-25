@@ -97,7 +97,7 @@ class DirichletProcess:
 
 
 class HierarchicalDirichletProcess:
-    def __init__(self, num_of_words: int, layers: int, sample_size: int, fixed_layers: dict = None, global_sample_size: int = 100):
+    def __init__(self, num_of_words: int, layers: int, sample_size: int, fixed_layers: dict = None, global_sample_size: int = 1000):
         '''
         Initialize a Hierarchical Dirichlet Process with layers
 
@@ -117,9 +117,13 @@ class HierarchicalDirichletProcess:
         # Initialize Global Dirichlet Process
         gamma = 100
         self.global_dist, self.true_params = self.generate_Global_DP(num_of_words, global_sample_size, gamma)
+        print("Global Base Distribution")
+        print(self.global_dist)
+        print("True Parameters")
+        print(self.true_params)
 
         # Initialize HDP variables (not finished yet)
-        eta = Gamma.sample(1, 1)
+        eta = Gamma(1, 1).sample()
         self.labels = self.generate_nCRP(sample_size, eta)
         self.num_categories_per_layer, self.hierarchy_tree = self.summarize_nCRP(self.labels)
         self.hdp = self.generate_HDP(sample_size, self.hierarchy_tree, self.labels)
@@ -181,12 +185,12 @@ class HierarchicalDirichletProcess:
                 if (unseen):
                     values.append(new_entry)
                     weights.append(1)
-        print("Global Dirichlet Process")
-        print("Values: ", values)
-        print("Weights: ", weights)
+        # print("Global Dirichlet Process")
+        # print("Values: ", values)
+        # print("Weights: ", weights)
         base_dist = {"values": torch.arange(len(weights)), "weights": torch.tensor(weights)}
-        print("Base Distribution")
-        print(base_dist)
+        # print("Base Distribution")
+        # print(base_dist)
         ground_truth = torch.stack(values)
         return base_dist, ground_truth
 
@@ -450,8 +454,8 @@ class HierarchicalDirichletProcess:
         '''
         Generate a Hierarchical Dirichlet Process
         '''
+        HDP_distributions_no_duplicate = []
         gamma = Gamma(1, 1).sample()
-        print(self.global_dist)
         Global = DirichletProcess(gamma, 10*sample_size, self.global_dist) 
         HDP_structure = []
         HDP_distributions = []
@@ -467,8 +471,6 @@ class HierarchicalDirichletProcess:
         for l in range(self.layers):
             alpha = Gamma(1, 1).sample()
             base = HDP_distributions[-1]
-            print("base distribution")
-            print(base)
             base_sample_sizes = HDP_sample_sizes[-1]
             alpha_list = [alpha.item()]*len(base_sample_sizes)
             param = list(zip(alpha_list, base_sample_sizes, base))
@@ -551,7 +553,7 @@ if __name__ == "__main__":
     # print(dp.get_values())
     # print(dp.get_weights())
 
-    hp = HierarchicalDirichletProcess(10, 3, {2: 10})
+    hp = HierarchicalDirichletProcess(10, 3, 100, {2: 10000})
     labels = hp.generate_nCRP(50, 1)
     print("labels")
     print(labels)
@@ -561,4 +563,5 @@ if __name__ == "__main__":
     print("hierarchy_tree")
     print(hierarchy_tree)
     hdp = hp.generate_HDP(100, hierarchy_tree, labels)
-    hp.visualize_HDP(hdp, labels)
+    print("HDP")
+    print(hdp)
