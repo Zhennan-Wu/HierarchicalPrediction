@@ -462,6 +462,7 @@ class HierarchicalDirichletProcess:
         HDP_sample_sizes = []
         counts = [len(list(hierarchy_tree.keys()))]
         HDP_distributions.append([Global.get_distribution()]*counts[0])
+        HDP_distributions_no_duplicate.append([Global.get_distribution()])
         sample_sizes = []
         for c in list(hierarchy_tree.values()):
             leaves = jax.tree_util.tree_leaves(c)
@@ -483,26 +484,32 @@ class HierarchicalDirichletProcess:
             if (l < self.layers - 1):
                 level, sample_sizes, counts = self._extract_child_layer(level)
                 child_distributions = []
+                child_distributions_no_duplicate = []
                 if (len(counts) != len(DPs)):
                     raise ValueError("The number of child layers {} should be equal to the number of Dirichlet Processes {}".format(len(counts), len(DPs)))
                 for count, DP in zip(counts, DPs):
+                    child_distributions_no_duplicate.append(DP.get_distribution())
                     next_base = [DP.get_distribution()]*count
                     child_distributions = child_distributions + next_base
                 HDP_distributions.append(child_distributions)
                 HDP_sample_sizes.append(sample_sizes)
+                HDP_distributions_no_duplicate.append(child_distributions_no_duplicate)
             else:
                 sample_sizes = level
                 counts = [1]*len(level)
                 child_distributions = []
+                child_distributions_no_duplicate = []
                 if (len(counts) != len(DPs)):
                     raise ValueError("The number of child layers {} should be equal to the number of Dirichlet Processes {}".format(len(counts), len(DPs)))
                 for count, DP in zip(counts, DPs):
+                    child_distributions_no_duplicate.append(DP.get_distribution())
                     next_base = [DP.get_distribution()]*count
                     child_distributions = child_distributions + next_base
+                HDP_distributions_no_duplicate.append(child_distributions_no_duplicate)
                 HDP_distributions.append(child_distributions)
                 HDP_sample_sizes.append(sample_sizes)
         self._check_nCRP_HDP_match(labels, HDP_structure)
-        return HDP_distributions
+        return HDP_distributions_no_duplicate, HDP_structure
 
     def _check_nCRP_HDP_match(self, nCRP_hierarchy: torch.Tensor, HDP_hierarchy: list):
         '''
@@ -533,7 +540,7 @@ class HierarchicalDirichletProcess:
         '''
         pass
 
-    def infer_HDP(self, HDP_distributions: list, labels: torch.Tensor):
+    def infer_HDP(self, HDP_distributions: list, labels: torch.Tensor, hdp_structure: list):
         '''
         Infer the Hierarchical Dirichlet Process layer by layer
         '''
@@ -562,6 +569,9 @@ if __name__ == "__main__":
     print(num_categories_per_layer)
     print("hierarchy_tree")
     print(hierarchy_tree)
-    hdp = hp.generate_HDP(100, hierarchy_tree, labels)
+    hdp, hdp_structure = hp.generate_HDP(100, hierarchy_tree, labels)
     print("HDP")
     print(hdp)
+    print(hp.visualize_HDP(hdp, labels))
+    print("HDP structure")
+    print(hdp_structure)
