@@ -7,10 +7,12 @@ import pyro
 import itertools
 import jax
 import jax.numpy as jnp
+import copy
 
 from pyro.distributions import Dirichlet, Gamma, Categorical
 from torch.multiprocessing import Pool
 from typing import Union
+from utils import *
 
 
 class Categorical_Distribution:
@@ -552,6 +554,17 @@ class HierarchicalDirichletProcess:
         Match the Hierarchical Dirichlet Process
         '''
         pass
+
+    def get_flat_index(self, hierarchy_tree: dict, labels: torch.Tensor):
+        '''
+        Get the flat index of the labels
+        '''
+        distributions = torch.tensor(jax.tree_util.tree_leaves(hierarchy_tree))
+        flat_categories = torch.cumsum(distributions, dim=0)
+        sorted_indices = sort_by_columns_with_original_indices(labels)
+        category_indices = find_indices_of_smallest_entries_bigger_than(flat_categories, sorted_indices)
+        
+        return category_indices
 
 
 if __name__ == "__main__":
