@@ -11,8 +11,11 @@ import copy
 
 from pyro.distributions import Dirichlet, Gamma, Categorical
 from torch.multiprocessing import Pool
-from typing import Union
+from typing import Any, Union, List, Tuple, Dict
+from jax.tree_util import PyTreeDef
 from utils import *
+
+PyTree = Union[jnp.ndarray, List['PyTree'], Tuple['PyTree', ...], Dict[Any, 'PyTree']]
 
 
 class Categorical_Distribution:
@@ -554,6 +557,40 @@ class HierarchicalDirichletProcess:
         Match the Hierarchical Dirichlet Process
         '''
         pass
+
+    def infer_nCRP(self, labels: torch.Tensor, hierarchy_tree: dict):
+        '''
+        Infer the nested Chinese Restaurant Process
+        '''
+        augmented_tree = add_key_to_nested_dict(hierarchy_tree, -1, 0.5) # Exact key and alpha value remain to be determined
+        category_indices = self.get_flat_index(augmented_tree, labels)
+        category_counts = torch.tensor(jax.tree_util.tree_leaves(augmented_tree))
+        augmented_structure = jax.tree.structure(augmented_tree)
+        params = self.generate_categorical_parameters(category_indices, category_counts)
+        new_categories = torch.distributions.Categorical(params).sample()
+        new_augmented_tree = self.update_categories(category_indices, category_counts, augmented_structure)
+        new_hierarchy_tree = modify_key_to_nested_dict(new_augmented_tree, -1, 0.5) # Exact key and alpha value remain to be determined
+        return new_hierarchy_tree
+
+    def generate_categorical_parameters(self, category_indices: torch.Tensor, category_counts: torch.Tensor):
+        '''
+        Generate the categorical parameters for the nested Chinese Restaurant Process
+        '''
+        params = torch.unsqueeze(category_counts, dim=0)
+        params = params.repeat(category_indices.shape[0], 1)
+        params[torch.arange(params.size(0)), category_indices] -= 1
+        return params
+
+    def update_categories(self, category_indices: torch.Tensor, category_counts: torch.Tensor, structure: Any):
+        '''
+        Generate the categorical parameters for the nested Chinese Restaurant Process
+        '''
+        params = torch.unsqueeze(category_counts, dim=0)
+        params = params.repeat(category_indices.shape[0], 1)
+        params[torch.arange(params.size(0)), category_indices] += 1
+        new_augmented_tree = jax.tree_util.tree_unflatten(structure, params)
+
+        return new_augmented_tree
 
     def get_flat_index(self, hierarchy_tree: dict, labels: torch.Tensor):
         '''
