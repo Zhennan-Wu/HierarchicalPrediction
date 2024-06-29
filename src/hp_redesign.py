@@ -566,11 +566,32 @@ class HierarchicalDirichletProcess:
         category_indices = self.get_flat_index(augmented_tree, labels)
         category_counts = torch.tensor(jax.tree_util.tree_leaves(augmented_tree))
         augmented_structure = jax.tree.structure(augmented_tree)
-        params = self.generate_categorical_parameters(category_indices, category_counts)
-        new_categories = torch.distributions.Categorical(params).sample()
-        new_augmented_tree = self.update_categories(category_indices, category_counts, augmented_structure)
+        prior_params = self.generate_categorical_parameters(category_indices, category_counts)
+        likelihood_params = self.get_likelihood_params(prior_params)
+        posterior_params = self.calculate_posterior(prior_params, likelihood_params)
+
+        new_categories = torch.distributions.Categorical(posterior_params).sample()
+        new_augmented_tree = self.update_categories(new_categories, category_counts, augmented_structure)
         new_hierarchy_tree = modify_key_to_nested_dict(new_augmented_tree, -1, 0.5) # Exact key and alpha value remain to be determined
         return new_hierarchy_tree
+
+    def calculate_posterior(self, prior_params: torch.Tensor, likelihood_params: torch.Tensor):
+        '''
+        Calculate the posterior of the nested Chinese
+        '''
+        pass
+
+    def get_likelihood_params(self, prior_params: torch.Tensor):
+        '''
+        Get the likelihood parameters
+        '''
+        pass
+
+    def infer_DP_distributions(self, hierarchy_tree: dict, labels: torch.Tensor):
+        '''
+        Infer the Dirichlet Process distributions
+        '''
+        pass 
 
     def generate_categorical_parameters(self, category_indices: torch.Tensor, category_counts: torch.Tensor):
         '''
