@@ -112,6 +112,8 @@ class HierarchicalDirichletProcess:
         - fixed_layers (dict): the fixed number of categories in each layer
         - global_sample_size (int): the number of samples to draw from the Global Dirichlet Process
         '''
+        self.mixture_dimension = num_of_words
+        self.activate_params = {}
         self.layers = layers
         self.layer_constrains = False
         self.implied_constraints = None
@@ -516,6 +518,17 @@ class HierarchicalDirichletProcess:
         self._check_nCRP_HDP_match(labels, HDP_structure)
         return HDP_distributions_no_duplicate, HDP_structure
 
+    def record_active_params(self, top_level_HDP_structure: dict):
+        '''
+        Record the active parameters in the Hierarchical Dirichlet Process
+        '''
+        for top_class in top_level_HDP_structure.keys():
+            for value, weight in zip(top_level_HDP_structure[top_class]["values"], top_level_HDP_structure[top_class]["weights"]):
+                if value in self.activate_params.keys():
+                    self.activate_params[value] += weight
+                else:
+                    self.activate_params[value] = weight
+
     def _check_nCRP_HDP_match(self, nCRP_hierarchy: torch.Tensor, HDP_hierarchy: list):
         '''
         Check if the nCRP and HDP hierarchies match
@@ -575,6 +588,12 @@ class HierarchicalDirichletProcess:
         new_hierarchy_tree = modify_key_to_nested_dict(new_augmented_tree, -1, 0.5) # Exact key and alpha value remain to be determined
         return new_hierarchy_tree
 
+    def calculate_conditional_density(self, mixture_index: int, sample_index: tuple, labels: torch.Tensor, hierarchy_tree: dict):
+        '''
+        Calculate the conditional density of the nested Chinese Restaurant Process
+        '''
+        pass
+
     def calculate_posterior(self, prior_params: torch.Tensor, likelihood_params: torch.Tensor):
         '''
         Calculate the posterior of the nested Chinese
@@ -626,10 +645,10 @@ class HierarchicalDirichletProcess:
 
 
 if __name__ == "__main__":
-    # dp = DirichletProcess(1)
-    # dp.sample(100)
-    # print(dp.get_values())
-    # print(dp.get_weights())
+    dp = DirichletProcess(1)
+    dp.sample(100)
+    print(dp.get_values())
+    print(dp.get_weights())
 
     hp = HierarchicalDirichletProcess(10, 3, 100, {2: 10000})
     labels = hp.generate_nCRP(50, 1)
@@ -646,3 +665,30 @@ if __name__ == "__main__":
     print(hp.visualize_HDP(hdp, labels))
     print("HDP structure")
     print(hdp_structure)
+    # import tomotopy as tp
+    # import matplotlib.pyplot as plt
+
+    # mdl = tp.LDAModel(k=20)
+    # for line in open('sample.txt'):
+    #     mdl.add_doc(line.strip().split())
+
+    # log_likelihoods = []
+    # iterations = []
+    # for i in range(0, 100, 1):
+    #     mdl.train(10)
+    #     print('Iteration: {}\tLog-likelihood: {}'.format(i, mdl.ll_per_word))
+    #     log_likelihoods.append(mdl.ll_per_word)
+    #     iterations.append(i)
+    # plt.plot(iterations[10:], log_likelihoods[10:])
+    # plt.xlabel("Iteration")
+    # plt.ylabel("Joint distribution")
+    # plt.title("Joint Probability under Gibbs Iterations Average over 10")
+    # # plt.show()
+    # plt.savefig("HDP_Gibbs_Sampling_Ave10.png")
+    
+
+    # for k in range(mdl.k):
+    #     print('Top 10 words of topic #{}'.format(k))
+    #     print(mdl.get_topic_words(k, top_n=10))
+
+    # mdl.summary()
