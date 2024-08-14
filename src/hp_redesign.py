@@ -8,6 +8,7 @@ import itertools
 import jax
 import jax.numpy as jnp
 import copy
+import random
 
 from pyro.distributions import Dirichlet, Gamma, Categorical
 from torch.multiprocessing import Pool
@@ -51,7 +52,9 @@ class DirichletProcess:
         self.values = []
         self.weights = []
         self.base_distribution = Categorical_Distribution(base_distribution["weights"], base_distribution["values"])
+        pyro.set_rng_seed(sample_size + random.randint(0, 1000))
         self.sample(sample_size)
+        
     
     def sample(self, num_samples: int):
         '''
@@ -146,7 +149,7 @@ class HierarchicalDirichletProcess:
                 if (all(fix_keys[i] <= fix_keys[i+1] for i in range(len(fix_keys)-1))):
                     raise ValueError("The fixed layers should be in increasing order, get {}".format(fix_keys))
                 if (all(fix_values[i] <= fix_values[i+1] for i in range(len(fix_values)-1))):
-                    raise ValueError("The fixed layers should have increasing number of categories, get{}".format(fix_values))
+                    raise ValueError("The fixed layers should have increasing number of categories, get {}".format(fix_values))
             self.layer_constrains = True
             layer_index = [float('inf')]*self.layers
             self.implied_constraints = {}
@@ -161,6 +164,7 @@ class HierarchicalDirichletProcess:
         Generate a Global Dirichlet Process with num_categories and concentration parameter gamma
 
         Parameters:
+        - dimension (int): the dimension of the Global Dirichlet Process
         - num_categories (int): the number of categories to generate
         - gamma (float): the concentration parameter of the Global Dirichlet Process
 
@@ -463,7 +467,8 @@ class HierarchicalDirichletProcess:
         '''
         HDP_distributions_no_duplicate = []
         gamma = Gamma(1, 1).sample()
-        Global = DirichletProcess(gamma, 10*sample_size, self.global_dist) 
+        global_scale = 10
+        Global = DirichletProcess(gamma, global_scale*sample_size, self.global_dist) # Generate global pool
         HDP_structure = []
         HDP_distributions = []
         HDP_sample_sizes = []
@@ -479,14 +484,18 @@ class HierarchicalDirichletProcess:
         for l in range(self.layers):
             alpha = Gamma(1, 1).sample()
             base = HDP_distributions[-1]
-            base_sample_sizes = HDP_sample_sizes[-1]
-            alpha_list = [alpha.item()]*len(base_sample_sizes)
+            base_sample_sizes = HDP_sample_sizes[-1] # Get how many samples are in each category
+            alpha_list = [alpha.item()]*len(base_sample_sizes) # Get the alpha value for each category
             param = list(zip(alpha_list, base_sample_sizes, base))
+            print("Layer: ", l)
+            print("Param: ", param)
             with Pool(len(base)) as p:
                 DPs = p.starmap(DirichletProcess, param)
             if (l == 0):
+                # Generate the first layer of the HDP
                 HDP_structure.append(self.update_hierarchy_dict(DPs, counts, labels))
             else:
+                # Generate the rest of the layers of the HDP
                 HDP_structure.append(self.update_hierarchy_dict(DPs, counts, labels, HDP_structure[-1]))
             if (l < self.layers - 1):
                 level, sample_sizes, counts = self._extract_child_layer(level)
@@ -645,12 +654,12 @@ class HierarchicalDirichletProcess:
 
 
 if __name__ == "__main__":
-    dp = DirichletProcess(1)
-    dp.sample(100)
-    print(dp.get_values())
-    print(dp.get_weights())
+    # dp = DirichletProcess(1)
+    # dp.sample(100)
+    # print(dp.get_values())
+    # print(dp.get_weights())
 
-    hp = HierarchicalDirichletProcess(10, 3, 100, {2: 10000})
+    hp = HierarchicalDirichletProcess(10, 3, 100, {2: 10})
     labels = hp.generate_nCRP(50, 1)
     print("labels")
     print(labels)
