@@ -54,7 +54,6 @@ class DirichletProcess:
         self.base_distribution = Categorical_Distribution(base_distribution["weights"], base_distribution["values"])
         pyro.set_rng_seed(sample_size + random.randint(0, 1000))
         self.sample(sample_size)
-        
     
     def sample(self, num_samples: int):
         '''
@@ -204,6 +203,34 @@ class HierarchicalDirichletProcess:
         # print(base_dist)
         ground_truth = torch.stack(values)
         return base_dist, ground_truth
+
+    def filter_related_samples(self, sample_index: int, samples: torch.Tensor, hierarchy_params_tree: dict, filter_type: str):
+        '''
+        Filter the related samples based on the sample index and the hierarchical parameters tree
+        '''
+        pass
+
+    def calc_conditional_density(self, samples, mixture_index: int, sample_index: int, hierarchy_params_tree: dict):
+        '''
+        Calculate the conditional density of the Hierarchical Dirichlet Process
+        '''
+        prior = self.global_dist["weights"]
+        related_samples = self.filter_related_samples(sample_index, samples, hierarchy_params_tree, "sample")
+        likelihood_denominator = torch.sum(torch.inner(self.global_dist["values"]*prior, related_samples), dim=-1)
+        likelihood_nominator = torch.sum(torch.inner(self.global_dist["values"]*prior*samples[sample_index], related_samples), dim=-1)
+        cdf = likelihood_nominator/likelihood_denominator
+        return cdf
+    
+    def calc_table_conditional_density(self, samples, mixture_index: int, table_index: int, hierarchy_params_tree: dict):
+        '''
+        Calculate the conditional density of the Hierarchical Dirichlet Process
+        '''
+        prior = self.global_dist["weights"]
+        related_samples = self.filter_related_samples(table_index, samples, hierarchy_params_tree, "table")
+        likelihood_denominator = torch.sum(torch.inner(self.global_dist["values"]*prior, related_samples), dim=-1)
+        likelihood_nominator = torch.sum(torch.inner(self.global_dist["values"]*prior*samples[table_index], related_samples), dim=-1)
+        cdf = likelihood_nominator/likelihood_denominator
+        return cdf
 
     def summarize_CRP(self, labels: Union[torch.Tensor, list], indices: Union[torch.Tensor, list]):
         '''
@@ -461,6 +488,30 @@ class HierarchicalDirichletProcess:
             child_dict = dict(zip(child_keys, distribution_params))
         return child_dict
 
+    def generate_parameters(self, sample_size: int, hierarchy_tree: dict, eta: float):
+        '''
+        Generate the parameters for the Hierarchical Dirichlet Process
+        '''
+        gamma = Gamma(1, 1).sample()
+        global_scale = 10
+        Global = DirichletProcess(gamma, global_scale*sample_size, self.global_dist) # Generate global pool
+        categorical_params = Global.get_distribution()
+        counts, hierarchy = jax.tree.flatten(hierarchy_tree)
+        counts_array = torch.tensor(counts)
+        hp_params_array = torch.zeros_like(counts_array)
+        hp_params = []
+        for idx, _ in enumerate(counts):
+            if (random.random() < eta/(eta + torch.dot(hp_params_array, counts_array).item())):
+                # Add a new label
+                new_label = categorical_params["values"][Categorical(categorical_params["weights"]).sample().item()]
+            else:
+                # Select an existing label
+                new_label = hp_params[Categorical(torch.tensor(counts[:idx])).sample().item()]    
+            hp_params.append(new_label)
+            hp_params_array[idx] = 1       
+        hierarchy_param_tree = jax.tree.unflatten(hierarchy, hp_params)
+        return hierarchy_param_tree
+
     def generate_HDP(self, sample_size: int, hierarchy_tree: dict, labels: torch.Tensor):
         '''
         Generate a Hierarchical Dirichlet Process
@@ -668,6 +719,9 @@ if __name__ == "__main__":
     print(num_categories_per_layer)
     print("hierarchy_tree")
     print(hierarchy_tree)
+    hierarchy_param_tree = hp.generate_parameters(100, hierarchy_tree, 100)
+    print("hierarchy_param_tree")
+    print(hierarchy_param_tree)
     hdp, hdp_structure = hp.generate_HDP(100, hierarchy_tree, labels)
     print("HDP")
     print(hdp)
