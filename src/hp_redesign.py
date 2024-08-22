@@ -208,29 +208,94 @@ class HierarchicalDirichletProcess:
         '''
         Filter the related samples based on the sample index and the hierarchical parameters tree
         '''
+        if (filter_type == "sample"):
+            pass
+        elif (filter_type == "table"):
+            pass
+        else:
+            raise ValueError("The filter type {} is not supported".format(filter_type))
         pass
 
-    def calc_conditional_density(self, samples, mixture_index: int, sample_index: int, hierarchy_params_tree: dict):
+    def calc_conditional_density(self, samples: torch.Tensor, mixture_index: int, sample_index: int, hierarchy_params_tree: dict):
         '''
         Calculate the conditional density of the Hierarchical Dirichlet Process
         '''
-        prior = self.global_dist["weights"]
-        related_samples = self.filter_related_samples(sample_index, samples, hierarchy_params_tree, "sample")
-        likelihood_denominator = torch.sum(torch.inner(self.global_dist["values"]*prior, related_samples), dim=-1)
-        likelihood_nominator = torch.sum(torch.inner(self.global_dist["values"]*prior*samples[sample_index], related_samples), dim=-1)
+        prior = self.global_dist["weights"].view(-1, 1)/torch.sum(self.global_dist["weights"]) 
+
+        related_samples = self.filter_related_samples(sample_index, mixture_index, samples, hierarchy_params_tree, "sample")
+        all_related_samples = torch.transpose(torch.cat((related_samples, samples[sample_index].view(1, -1)), dim=0), 0, 1)
+        related_samples = torch.transpose(related_samples, 0, 1)
+        # calculate denominator
+        log_joint_prob = torch.log(torch.inner(self.global_dist["values"]*prior, related_samples)) # dimension: number of parameter samples * number of samples
+        joint_prob = torch.exp(torch.sum(log_joint_prob, dim=-1))
+        likelihood_denominator = torch.sum(joint_prob)
+
+        # calculate nominator
+        log_joint_prob = torch.log(torch.inner(self.global_dist["values"]*prior, all_related_samples)) # dimension: number of parameter samples * number of samples
+        joint_prob = torch.exp(torch.sum(log_joint_prob, dim=-1))
+        likelihood_nominator = torch.sum(joint_prob)
         cdf = likelihood_nominator/likelihood_denominator
         return cdf
     
-    def calc_table_conditional_density(self, samples, mixture_index: int, table_index: int, hierarchy_params_tree: dict):
+    def get_sample_index_from_table_index(self, table_index: int, hierarchy_params_tree: dict):
+        '''
+        Get the sample index from the table index
+        '''
+        pass
+
+    def calc_table_conditional_density(self, samples: torch.Tensor, mixture_index: int, table_index: int, hierarchy_params_tree: dict):
         '''
         Calculate the conditional density of the Hierarchical Dirichlet Process
         '''
-        prior = self.global_dist["weights"]
-        related_samples = self.filter_related_samples(table_index, samples, hierarchy_params_tree, "table")
-        likelihood_denominator = torch.sum(torch.inner(self.global_dist["values"]*prior, related_samples), dim=-1)
-        likelihood_nominator = torch.sum(torch.inner(self.global_dist["values"]*prior*samples[table_index], related_samples), dim=-1)
+        prior = self.global_dist["weights"].view(-1, 1)/torch.sum(self.global_dist["weights"]) 
+
+        related_samples = self.filter_related_samples(table_index, mixture_index, samples, hierarchy_params_tree, "table")
+        sample_index = self.get_sample_index_from_table_index(table_index, hierarchy_params_tree)
+        all_related_samples = torch.transpose(torch.cat((related_samples, samples[sample_index]), dim=0), 0, 1)
+        related_samples = torch.transpose(related_samples, 0, 1)
+        # calculate denominator
+        log_joint_prob = torch.log(torch.inner(self.global_dist["values"]*prior, related_samples)) # dimension: number of parameter samples * number of samples
+        joint_prob = torch.exp(torch.sum(log_joint_prob, dim=-1))
+        likelihood_denominator = torch.sum(joint_prob)
+
+        # calculate nominator
+        log_joint_prob = torch.log(torch.inner(self.global_dist["values"]*prior, all_related_samples)) # dimension: number of parameter samples * number of samples
+        joint_prob = torch.exp(torch.sum(log_joint_prob, dim=-1))
+        likelihood_nominator = torch.sum(joint_prob)
         cdf = likelihood_nominator/likelihood_denominator
         return cdf
+
+    def calculate_posterior(self, samples: torch.Tensor, hierarchy_params_tree: dict, K: int, layer: int):
+        '''
+        Calculate the posterior of the nested Chinese Restaurant Process
+        '''
+        if (layer == 1):
+            global_new_probs = []
+            f_value = []
+            for sample in samples:
+                new_probs = []
+                for k in range(K):
+                    new_prob = self.calc_conditional_density(samples, k, sample, hierarchy_params_tree)
+                    f_value.append(new_prob)
+                    weight = 1 # remained to be completed
+                    new_probs.append(new_prob*weight)
+                global_new_probs.append(new_probs)
+            count = hierarchy_param_tree[0] # remained to be completed
+            posterior = torch.stack(f_value*count, global_new_probs)
+        elif (layer == 2):
+            global_new_probs = []
+            f_value = []
+            for sample in samples:
+                new_probs = []
+                for k in range(K):
+                    new_prob = self.calc_table_conditional_density(samples, k, sample, hierarchy_params_tree)
+                    f_value.append(new_prob)
+                    weight = 1
+                    new_probs.append(new_prob*weight)
+                global_new_probs.append(new_probs)
+            count = hierarchy_param_tree[0]
+            posterior = torch.stack(f_value*count, global_new_probs)
+        return posterior
 
     def summarize_CRP(self, labels: Union[torch.Tensor, list], indices: Union[torch.Tensor, list]):
         '''
