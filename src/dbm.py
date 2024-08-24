@@ -10,6 +10,7 @@ class DBM:
         self.input_size = input_size
         self.layers = layers
         self.layer_parameters = [{"W":None} for _ in range(len(layers))]
+        self.layer_mean_field_parameters = [{"mu":None} for _ in range(len(layers))]
         self.k = k
         self.mode = mode
         self.savefile = savefile
@@ -27,11 +28,11 @@ class DBM:
         else:
             raise ValueError("Invalid mode")
     
-    def sample_h(self, x, W):
+    def sample_h(self, x_bottom, W_bottom, x_top = torch.zeros(1), W_top = torch.zeros(1, 1)):
         """
         Sample hidden units given visible units
         """
-        activation = torch.mm(x, W.t())
+        activation = torch.mm(x_bottom, W_bottom.t()) + torch.mm(x_top, W_top.t())
         p_h_given_v = torch.sigmoid(activation)
         if (self.mode == "bernoulli"):
             return p_h_given_v, torch.bernoulli(p_h_given_v)
@@ -57,7 +58,7 @@ class DBM:
             x_dash = torch.mean(x_dash, dim=0)
             return x_dash
     
-    def train(self, x):
+    def pre_train(self, x):
         """
         Train DBM
         """
@@ -76,6 +77,55 @@ class DBM:
         if (self.savefile is not None):
             torch.save(self.layer_parameters, self.savefile)
     
+    def train(self, x, iterations, mf_maximum_steps=10):
+        """
+        Train DBM
+        """
+        # Initialize mean field parameters
+        batch_size, data_dimension = x.size()
+        for index, _ in enumerate(self.layers):
+            unnormalized_mf_param = torch.rand(data_dimension)
+            self.layer_mean_field_parameters[index]["mu"] = unnormalized_mf_param/torch.sum(unnormalized_mf_param)
+
+        # Mean field updates
+        for _ in range(iterations):
+            mf_step = 0
+            mu_diff = torch.tensor(-1)
+            while (mf_step < mf_maximum_steps):
+                for index, _ in enumerate(self.layers):
+                    if (index == self.layers-1):
+                        old_mu = self.layer_mean_field_parameters[index]["mu"]
+
+                        activation = torch.mm(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"].t())
+                        self.layer_mean_field_parameters[index]["mu"] = torch.sigmoid(activation)
+
+                        mu_diff = torch.max(torch.sum(torch.abs(old_mu - self.layer_mean_field_parameters[index]["mu"])), mu_diff)
+                    elif (index == 0):
+                        old_mu = self.layer_mean_field_parameters[index]["mu"]
+
+                        activation = torch.mm(x, self.layer_parameters[index]["W"].t()) + torch.mm(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"].t())
+                        self.layer_mean_field_parameters[index]["mu"] = torch.sigmoid(activation)
+
+                        mu_diff = torch.max(torch.sum(torch.abs(old_mu - self.layer_mean_field_parameters[index]["mu"])), mu_diff)
+                    else:
+                        old_mu = self.layer_mean_field_parameters[index]["mu"]
+
+                        activation = torch.mm(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"].t()) + torch.mm(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"].t())
+                        self.layer_mean_field_parameters[index]["mu"] = torch.sigmoid(activation)
+                        
+                        mu_diff = torch.max(torch.sum(torch.abs(old_mu - self.layer_mean_field_parameters[index]["mu"])), mu_diff)
+                mf_step += 1
+                if (mu_diff < 0.001):
+                    print("Mean Field Converged")
+                    break
+            if (mf_step == mf_maximum_steps):
+                print("Mean Field did not converge with maximum difference {}".format(mu_diff))
+            
+            # Update weights
+            
+
+        pass
+
     def fine_tune(self, x, top_level_latent_variables):
         pass
 
