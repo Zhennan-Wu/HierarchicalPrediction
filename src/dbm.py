@@ -58,7 +58,7 @@ class DBM:
             x_dash = torch.mean(x_dash, dim=0)
             return x_dash
     
-    def pre_train(self, x):
+    def pre_train(self, dataset):
         """
         Train DBM
         """
@@ -70,22 +70,28 @@ class DBM:
             hn = self.layers[index]
 
             rbm = RBM_no_bias(vn, hn, epochs=100, mode="bernoulli", lr=0.0005, k=10, batch_size=128, gpu=True, optimizer="adam", early_stopping_patient=10)
-            x_dash = self.generate_input_for_layer(index, x)
+            x_dash = self.generate_input_for_layer(index, dataset)
             rbm.train(x_dash)
             self.layer_parameters[index]["W"] = rbm.weights
             print("Finished Training Layer", index, "to", index+1)
         if (self.savefile is not None):
             torch.save(self.layer_parameters, self.savefile)
     
-    def train(self, x, iterations, mf_maximum_steps=10):
+    def train(self, dataset, iterations, mf_maximum_steps=10):
         """
         Train DBM
         """
         # Initialize mean field parameters
-        batch_size, data_dimension = x.size()
+        batch_size, data_dimension = dataset.size()
         for index, _ in enumerate(self.layers):
             unnormalized_mf_param = torch.rand(data_dimension)
             self.layer_mean_field_parameters[index]["mu"] = unnormalized_mf_param/torch.sum(unnormalized_mf_param)
+        variables = []
+        for index, _ in enumerate(self.layers):
+            if (index == 0):
+                variables.append(dataset)
+            else:
+                variables.append(self.generate_input_for_layer(index, dataset))
 
         # Mean field updates
         for _ in range(iterations):
@@ -96,21 +102,21 @@ class DBM:
                     if (index == self.layers-1):
                         old_mu = self.layer_mean_field_parameters[index]["mu"]
 
-                        activation = torch.mm(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"].t())
+                        activation = torch.mm(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"])
                         self.layer_mean_field_parameters[index]["mu"] = torch.sigmoid(activation)
 
                         mu_diff = torch.max(torch.sum(torch.abs(old_mu - self.layer_mean_field_parameters[index]["mu"])), mu_diff)
                     elif (index == 0):
                         old_mu = self.layer_mean_field_parameters[index]["mu"]
 
-                        activation = torch.mm(x, self.layer_parameters[index]["W"].t()) + torch.mm(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"].t())
+                        activation = torch.mm(dataset, self.layer_parameters[index]["W"]) + torch.mm(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"].t())
                         self.layer_mean_field_parameters[index]["mu"] = torch.sigmoid(activation)
 
                         mu_diff = torch.max(torch.sum(torch.abs(old_mu - self.layer_mean_field_parameters[index]["mu"])), mu_diff)
                     else:
                         old_mu = self.layer_mean_field_parameters[index]["mu"]
 
-                        activation = torch.mm(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"].t()) + torch.mm(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"].t())
+                        activation = torch.mm(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"]) + torch.mm(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"].t())
                         self.layer_mean_field_parameters[index]["mu"] = torch.sigmoid(activation)
                         
                         mu_diff = torch.max(torch.sum(torch.abs(old_mu - self.layer_mean_field_parameters[index]["mu"])), mu_diff)
@@ -121,10 +127,26 @@ class DBM:
             if (mf_step == mf_maximum_steps):
                 print("Mean Field did not converge with maximum difference {}".format(mu_diff))
             
-            # Update weights
+            # Update samples (subsample a subset of Markov Chains is excluded, it might need be added later for better performance)
+            new_variables = []
+            for index, _ in enumerate(self.layers):
+                if (index == 0):
+                    new_variables.append(self.sample_v(variables[index+1], self.layer_parameters[index]["W"]))
+                elif (index == self.layers-1):
+                    new_variables.append(self.sample_h(variables[index-1], self.layer_parameters[index]["W"]))
+                else:  
+                    new_variables.append(self.sample_h(variables[index-1], self.layer_parameters[index]["W"], variables[index+1], self.layer_parameters[index+1]["W"]))
             
-
-        pass
+            # Update model parameters
+            alpha = 0.01
+            for index, _ in enumerate(self.layers):
+                if (index == 0):
+                    self.layer_parameters[index]["W"] += alpha * (torch.mm(variables[index].t(), self.layer_mean_field_parameters[index]["mu"])/batch_size - torch.mm(new_variables[index].t(), new_variables[index+1])/batch_size)
+                else:
+                    self.layer_parameters[index]["W"] += alpha * (torch.mm(self.layer_mean_field_parameters[index-1]["mu"].t(), self.layer_mean_field_parameters[index]["mu"])/batch_size - torch.mm(new_variables[index].t(), new_variables[index+1])/batch_size)
+            
+            variables = new_variables
+            alpha -= 0.001
 
     def fine_tune(self, x, top_level_latent_variables):
         pass
