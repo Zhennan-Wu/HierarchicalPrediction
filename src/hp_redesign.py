@@ -39,6 +39,41 @@ class Categorical_Distribution:
         return self.values[idx.item()]
     
 
+class GEM_Distribution:
+    def __init__(self, alpha: float, beta: float, num_categories: int):
+        '''
+        Initialize a GEM Distribution with concentration parameter alpha and number of categories
+
+        Parameters:
+        - alpha (float): the concentration parameter of the GEM Distribution
+        - num_categories (int): the number of categories in the GEM Distribution
+        '''
+        self.alpha = alpha
+        self.beta = beta
+        self.num_categories = num_categories
+        self.values = []
+        self.sample()
+    
+    def sample(self):
+        '''
+        Sample from the GEM Distribution
+        '''
+        weights = []
+        for k in range(self.num_categories):
+            pi_prime = torch.distributions.Beta(self.alpha, self.beta).sample()
+            weights.append(pi_prime)
+            pi_final = pi_prime
+            for i in range(k):
+                pi_final *= 1 - weights[i]
+            self.values.append(pi_final)
+    
+    def get_values(self):
+        '''
+        Get the values of the GEM Distribution
+        '''
+        return self.values
+    
+    
 class DirichletProcess:
     def __init__(self, alpha: float, sample_size: int, base_distribution: dict):
         '''
@@ -104,7 +139,7 @@ class DirichletProcess:
 
 
 class HierarchicalDirichletProcess:
-    def __init__(self, num_of_words: int, layers: int, sample_size: int, fixed_layers: dict = None, global_sample_size: int = 1000):
+    def __init__(self, latent_dimension: int, layers: int, batch_size: int, fixed_layers: dict = None):
         '''
         Initialize a Hierarchical Dirichlet Process with layers
 
@@ -114,29 +149,41 @@ class HierarchicalDirichletProcess:
         - fixed_layers (dict): the fixed number of categories in each layer
         - global_sample_size (int): the number of samples to draw from the Global Dirichlet Process
         '''
-        self.mixture_dimension = num_of_words
-        self.activate_params = {}
+        self.batch_size = batch_size
+        self.latent_dimension = latent_dimension
         self.layers = layers
         self.layer_constrains = False
         self.implied_constraints = None
         self.fixed_layers = fixed_layers
         self._check_layer_constraints()
+        self.parameters = self.generate_parameters()
 
-        self.category_hierarchy = []
+        # self.category_hierarchy = []
         # Initialize Global Dirichlet Process
-        gamma = 100
-        self.global_dist, self.true_params = self.generate_Global_DP(num_of_words, global_sample_size, gamma)
-        print("Global Base Distribution")
-        print(self.global_dist)
-        print("True Parameters")
-        print(self.true_params)
+        # gamma = 100
+        # self.global_dist, self.true_params = self.generate_Global_DP(latent_dimension, global_sample_size, gamma)
+        # print("Global Base Distribution")
+        # print(self.global_dist)
+        # print("True Parameters")
+        # print(self.true_params)
 
         # Initialize HDP variables (not finished yet)
         eta = Gamma(1, 1).sample()
-        self.labels = self.generate_nCRP(sample_size, eta)
+        self.labels = self.generate_nCRP(batch_size, eta)
         self.num_categories_per_layer, self.hierarchy_tree = self.summarize_nCRP(self.labels)
-        self.hdp = self.generate_HDP(sample_size, self.hierarchy_tree, self.labels)
+        self.hdp = self.generate_HDP(batch_size, self.hierarchy_tree, self.labels)
+        
+        self.activate_params = {}
+
     
+    def generate_parameters(self):
+        '''
+        Generate the parameters for the Hierarchical Dirichlet Process
+        '''
+        beta = Gamma(1, 1).sample()
+        base_distribution = Dirichlet(beta * torch.ones(self.latent_dimension))
+        return base_distribution.sample(self.batch_size)
+
     def _check_layer_constraints(self):
         '''
         Check if the layer constraints are satisfied
