@@ -172,6 +172,7 @@ class HierarchicalDirichletProcess:
         '''
         self.hyperparameters = {}
         self.batch_size = batch_size
+        self.truncate_length = batch_size
         self.latent_dimension = latent_dimension
         self.layers = layers
         self.layer_constrains = False
@@ -206,7 +207,7 @@ class HierarchicalDirichletProcess:
         '''
         beta = self.hyperparameters["BASE"]
         base_distribution = Dirichlet(beta * torch.ones(self.latent_dimension))
-        return base_distribution.sample(self.batch_size)
+        return base_distribution.sample(self.truncate_length)
 
     def _check_layer_constraints(self):
         '''
