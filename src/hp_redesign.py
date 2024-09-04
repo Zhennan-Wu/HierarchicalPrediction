@@ -136,6 +136,27 @@ class DirichletProcess:
         Get the distribution of the Dirichlet Process
         '''
         return {"values": torch.stack(self.values), "weights": torch.tensor(self.weights)}
+   
+   
+def calc_sequential_stick_breaking_weight(alpha: float, parent_weights: list, num_categories: int):
+    '''
+    Generate the hierarchical distributions
+    '''
+    child_weights = []
+    v_values = []
+    for k in range(num_categories):
+        concentrate0 = alpha*parent_weights[k]
+        concentrate1 = 1
+        for l in range(k):
+            concentrate1 -= parent_weights[l]
+
+        v_prime = torch.distributions.Beta(concentrate0, concentrate1).sample()
+        v_values.append(v_prime)
+        pi_final = v_prime
+        for j in range(k):
+            pi_final *= 1 - v_values[j]
+        child_weights.append(pi_final)
+    return child_weights
 
 
 class HierarchicalDirichletProcess:
@@ -149,6 +170,7 @@ class HierarchicalDirichletProcess:
         - fixed_layers (dict): the fixed number of categories in each layer
         - global_sample_size (int): the number of samples to draw from the Global Dirichlet Process
         '''
+        self.hyperparameters = {}
         self.batch_size = batch_size
         self.latent_dimension = latent_dimension
         self.layers = layers
@@ -156,6 +178,8 @@ class HierarchicalDirichletProcess:
         self.implied_constraints = None
         self.fixed_layers = fixed_layers
         self._check_layer_constraints()
+        beta = Gamma(1, 1).sample()
+        self.hyperparameters["BASE"] = beta
         self.parameters = self.generate_parameters()
 
         # self.category_hierarchy = []
@@ -169,18 +193,18 @@ class HierarchicalDirichletProcess:
 
         # Initialize HDP variables (not finished yet)
         eta = Gamma(1, 1).sample()
-        self.labels = self.generate_nCRP(batch_size, eta)
+        self.hyperparameters["CRF"] = eta
+        self.labels = self.generate_nCRP(batch_size)
         self.num_categories_per_layer, self.hierarchy_tree = self.summarize_nCRP(self.labels)
         self.hdp = self.generate_HDP(batch_size, self.hierarchy_tree, self.labels)
         
         self.activate_params = {}
 
-    
     def generate_parameters(self):
         '''
         Generate the parameters for the Hierarchical Dirichlet Process
         '''
-        beta = Gamma(1, 1).sample()
+        beta = self.hyperparameters["BASE"]
         base_distribution = Dirichlet(beta * torch.ones(self.latent_dimension))
         return base_distribution.sample(self.batch_size)
 
@@ -205,51 +229,51 @@ class HierarchicalDirichletProcess:
             for i in range(self.layers):
                 self.implied_constraints[i] = min(layer_index[i:])
         
-    def generate_Global_DP(self, dimension: int, num_samples: int, gamma: float):
-        '''
-        Generate a Global Dirichlet Process with num_categories and concentration parameter gamma
+    # def generate_Global_DP(self, dimension: int, num_samples: int, gamma: float):
+    #     '''
+    #     Generate a Global Dirichlet Process with num_categories and concentration parameter gamma
 
-        Parameters:
-        - dimension (int): the dimension of the Global Dirichlet Process
-        - num_categories (int): the number of categories to generate
-        - gamma (float): the concentration parameter of the Global Dirichlet Process
+    #     Parameters:
+    #     - dimension (int): the dimension of the Global Dirichlet Process
+    #     - num_categories (int): the number of categories to generate
+    #     - gamma (float): the concentration parameter of the Global Dirichlet Process
 
-        Returns:
-        - values (torch.Tensor): the values of the Global Dirichlet Process
-        - weights (torch.Tensor): the weights of the values in the Global Dirichlet Process
-        '''
-        weights = []
-        values = []
-        base_param = Gamma(1, 1).sample()
-        base_distribution = Dirichlet(base_param * torch.ones(dimension))
-        for _ in range(num_samples):
-            total_counts = sum(weights)
-            probs = torch.tensor(weights) / total_counts
-            p_existing = gamma / (gamma + total_counts)
-            if (torch.rand(1) > p_existing):
-                # Select existing sample
-                idx = Categorical(probs).sample()
-                weights[idx] += 1
-            else:
-                # Sample from the base distribution
-                new_entry = base_distribution.sample()
-                unseen = True
-                for index, entry in enumerate(values):
-                    if (torch.equal(entry, new_entry)):
-                        weights[index] += 1
-                        unseen = False
-                        break
-                if (unseen):
-                    values.append(new_entry)
-                    weights.append(1)
-        # print("Global Dirichlet Process")
-        # print("Values: ", values)
-        # print("Weights: ", weights)
-        base_dist = {"values": torch.arange(len(weights)), "weights": torch.tensor(weights)}
-        # print("Base Distribution")
-        # print(base_dist)
-        ground_truth = torch.stack(values)
-        return base_dist, ground_truth
+    #     Returns:
+    #     - values (torch.Tensor): the values of the Global Dirichlet Process
+    #     - weights (torch.Tensor): the weights of the values in the Global Dirichlet Process
+    #     '''
+    #     weights = []
+    #     values = []
+    #     base_param = Gamma(1, 1).sample()
+    #     base_distribution = Dirichlet(base_param * torch.ones(dimension))
+    #     for _ in range(num_samples):
+    #         total_counts = sum(weights)
+    #         probs = torch.tensor(weights) / total_counts
+    #         p_existing = gamma / (gamma + total_counts)
+    #         if (torch.rand(1) > p_existing):
+    #             # Select existing sample
+    #             idx = Categorical(probs).sample()
+    #             weights[idx] += 1
+    #         else:
+    #             # Sample from the base distribution
+    #             new_entry = base_distribution.sample()
+    #             unseen = True
+    #             for index, entry in enumerate(values):
+    #                 if (torch.equal(entry, new_entry)):
+    #                     weights[index] += 1
+    #                     unseen = False
+    #                     break
+    #             if (unseen):
+    #                 values.append(new_entry)
+    #                 weights.append(1)
+    #     # print("Global Dirichlet Process")
+    #     # print("Values: ", values)
+    #     # print("Weights: ", weights)
+    #     base_dist = {"values": torch.arange(len(weights)), "weights": torch.tensor(weights)}
+    #     # print("Base Distribution")
+    #     # print(base_dist)
+    #     ground_truth = torch.stack(values)
+    #     return base_dist, ground_truth
 
     def filter_related_samples(self, sample_index: int, samples: torch.Tensor, hierarchy_params_tree: dict, filter_type: str):
         '''
@@ -456,7 +480,7 @@ class HierarchicalDirichletProcess:
             labels.append(torch.tensor(p_labels))
         return labels
     
-    def generate_nCRP(self, sample_size: int, eta: float):
+    def generate_nCRP(self, sample_size: int):
         '''
         Generate a nested Chinese Restaurant Process with sample size sample_size and concentration parameter eta
         
@@ -467,6 +491,7 @@ class HierarchicalDirichletProcess:
         Returns:
         - label_hierarchy (torch.Tensor): the labels of the samples in the nested Chinese Restaurant Process
         '''
+        eta = self.hyperparameters["CRF"]
         label_hierarchy = []
         prev_labels = self.generate_CRP(sample_size, eta)
         prev_indices = torch.arange(sample_size)
