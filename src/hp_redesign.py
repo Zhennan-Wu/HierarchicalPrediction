@@ -109,15 +109,15 @@ def calc_sequential_stick_breaking_weight(alpha: float, parent_weights: list, nu
     '''
     child_weights = []
     v_values = []
+
+    concentrate1 = alpha
     for k in range(num_categories):
         concentrate0 = alpha*parent_weights[k]
-        concentrate1 = 1
-        for l in range(k):
-            concentrate1 -= parent_weights[l]
-        concentrate1 *= alpha
-
+        concentrate1 -= concentrate0
         if (concentrate0 < 0 or concentrate1 < 0):
-            raise ValueError("The concentration parameters should be greater than 0")
+            raise ValueError("The concentration parameters should be greater than 0, instead we have concentrate0: {} and concentrate1: {}".format(concentrate0, concentrate1))
+        concentrate0 = max(concentrate0, 1e-3)
+        concentrate1 = max(concentrate1, 1e-3)
         v_prime = torch.distributions.Beta(concentrate0, concentrate1).sample()
         v_values.append(v_prime)
         pi_final = v_prime
@@ -137,7 +137,7 @@ def transfer_index_tensor_to_string(index: torch.Tensor):
 
 
 class HierarchicalDirichletProcess:
-    def __init__(self, latent_dimension: int, layers: int, batch_size: int, fixed_layers: dict = None):
+    def __init__(self, latent_dimension: int, layers: int, batch_size: int, truncated_length: int, fixed_layers: dict = None):
         '''
         Initialize a Hierarchical Dirichlet Process with layers
 
@@ -149,7 +149,7 @@ class HierarchicalDirichletProcess:
         '''
         self.hyperparameters = {}
         self.batch_size = batch_size
-        self.truncate_length = batch_size
+        self.truncate_length = truncated_length
         self.latent_dimension = latent_dimension
         self.layers = layers
         self.layer_constrains = False
@@ -234,17 +234,16 @@ class HierarchicalDirichletProcess:
         Generate the base weights of the Hierarchical Dirichlet Process
         '''
         beta = self.hyperparameters["GLOBAL"]
-        pi_values = []
+        remaining_weight = 1
         weights = []
-        for k in range(self.truncate_length):
+        for _ in range(self.truncate_length):
             pi_prime = torch.distributions.Beta(1, beta).sample()
-            pi_values.append(pi_prime)
-            pi_final = pi_prime
-            for i in range(k):
-                pi_final *= 1 - pi_values[i]
-            weights.append(pi_final)
-        if (sum(weights) != 1):
-            raise ValueError("The sum of the weights should be 1, instead got {}".format(sum(weights)))
+            pi_value = pi_prime * remaining_weight
+            weights.append(pi_value)
+            remaining_weight *= (1 - pi_prime)
+           
+        if (sum(weights) > 1):
+            raise ValueError("The sum of the weights should be smaller than 1, instead got {}".format(sum(weights)))
         return weights
     
     def generate_CRF(self):
@@ -375,7 +374,7 @@ class HierarchicalDirichletProcess:
             distributions = p.starmap(calc_sequential_stick_breaking_weight, params)
         self.distributions.append(dict(zip(child_categories, distributions)))
 
-        for l in self.layers:
+        for l in range(self.layers):
             parents = self.number_of_subcategories[l].keys()
             num_childs = self.number_of_subcategories[l].values()
             children = self.number_of_subcategories[l+1].keys()
@@ -387,7 +386,7 @@ class HierarchicalDirichletProcess:
             truncated_lengths = [self.truncate_length]*total_num_childs
             parents_weights = []
             for parent, nc in zip(parents, num_childs):
-                parents_weights += [self.distributions[parent]]*nc
+                parents_weights += [self.distributions[l][parent]]*nc
             
             with Pool(total_num_childs) as p:
                 params = list(zip(etas, parents_weights, truncated_lengths))
@@ -891,7 +890,7 @@ if __name__ == "__main__":
     # print(dp.get_values())
     # print(dp.get_weights())
 
-    hp = HierarchicalDirichletProcess(10, 3, 100, {2: 10})
+    hp = HierarchicalDirichletProcess(10, 3, 100, 10, {2: 10})
     hp.print_base_weights()
     hp.print_parameters()
     hp.print_hyperparameters()
