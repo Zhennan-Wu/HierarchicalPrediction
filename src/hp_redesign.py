@@ -109,13 +109,10 @@ def calc_sequential_stick_breaking_weight(alpha: float, parent_weights: list, nu
     '''
     child_weights = []
     v_values = []
-
     concentrate1 = alpha
     for k in range(num_categories):
         concentrate0 = alpha*parent_weights[k]
         concentrate1 -= concentrate0
-        if (concentrate0 < 0 or concentrate1 < 0):
-            raise ValueError("The concentration parameters should be greater than 0, instead we have concentrate0: {} and concentrate1: {}".format(concentrate0, concentrate1))
         concentrate0 = max(concentrate0, 1e-3)
         concentrate1 = max(concentrate1, 1e-3)
         v_prime = torch.distributions.Beta(concentrate0, concentrate1).sample()
@@ -324,38 +321,6 @@ class HierarchicalDirichletProcess:
             index_string = transfer_index_tensor_to_string(pc)
             num_subcategories[index_string] = 1   
         self.number_of_subcategories.append(num_subcategories)
-
-
-    # def get_hierarchy_info(self):
-    #     '''
-    #     Summarize the nested Chinese Restaurant Process to get the unique values and their counts
-
-    #     Returns:
-    #     - categories (torch.Tensor): the unique values in the labels tensor or list of tensors (same value in different tensors are considered as different values)
-    #     - counts (torch.Tensor): the counts of the unique values in the labels tensor or list of tensors (same value in different tensors are considered as different values)
-    #     '''
-    #     label_hierarchy = self.labels
-
-    #     num_categories_per_layer = {}
-    #     for l in range(self.layers):
-    #         categories = torch.unique(label_hierarchy[:, :l+1], dim=0)
-    #         num_categories_per_layer[l] = categories.shape[0]
-
-    #     hierarchy_tree = {}
-    #     for entry in label_hierarchy:
-    #         level = hierarchy_tree
-    #         for l, category in enumerate(entry):
-    #             if category.item() not in level:
-    #                 if (l == self.layers - 1):
-    #                     level[category.item()] = 1
-    #                 else:
-    #                     level[category.item()] = {}
-    #             else:
-    #                 if (l == self.layers - 1):
-    #                     level[category.item()] += 1
-    #             level = level[category.item()]
-
-    #     return num_categories_per_layer, hierarchy_tree
     
     def generate_hierarchy_tree(self):
         '''
