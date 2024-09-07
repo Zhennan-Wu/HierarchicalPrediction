@@ -156,20 +156,15 @@ class HierarchicalDirichletProcess:
 
         # a list of dictionaries, to record the number of subcategories in each layer
         self.number_of_subcategories = [] 
-
-
         # Initialize the base distribution
         beta = Gamma(1, 1).sample()
         self.hyperparameters["BASE"] = beta
         self.parameters = self.generate_parameters()
-
         # Initialize hierarchical structure
         eta = Gamma(1, 1).sample()
         self.hyperparameters["CRF"] = eta
         self.labels = self.generate_CRF()
         self.get_number_of_subcategories()
-        # self.hdp = self.generate_HDP(batch_size, self.hierarchy_tree, self.labels)
-
         # Record hierarchical distributions
         beta = Gamma(1, 1).sample()
         self.hyperparameters["GLOBAL"] = beta
