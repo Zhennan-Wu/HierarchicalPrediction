@@ -162,8 +162,8 @@ class HierarchicalDirichletProcess:
         self.parameters = self.generate_parameters()
         # Initialize hierarchical structure
         eta = Gamma(1, 1).sample()
-        self.hyperparameters["CRF"] = eta
-        self.labels = self.generate_CRF()
+        self.hyperparameters["nCRP"] = eta
+        self.labels = self.generate_nCRP()
         self.get_number_of_subcategories()
         # Record hierarchical distributions
         beta = Gamma(1, 1).sample()
@@ -238,14 +238,14 @@ class HierarchicalDirichletProcess:
             raise ValueError("The sum of the weights should be smaller than 1, instead got {}".format(sum(weights)))
         return weights
     
-    def generate_CRF(self):
+    def generate_nCRP(self):
         '''
         Generate a nested Chinese Restaurant Process with sample size sample_size and concentration parameter eta
 
         Returns:
         - label_hierarchy (torch.Tensor): the labels of the samples in the nested Chinese Restaurant Process
         '''
-        eta = self.hyperparameters["CRF"]
+        eta = self.hyperparameters["nCRP"]
         label_hierarchy = []
         parent_labels = self._generate_CRP(self.batch_size, eta)
         indices_group_by_categories = torch.arange(self.batch_size)
@@ -858,7 +858,7 @@ if __name__ == "__main__":
     hp.print_labels()
     hp.print_number_of_subcategories()
 
-    # labels = hp.generate_CRF(50, 1)
+    # labels = hp.generate_nCRP(50, 1)
     # print("labels")
     # print(labels)
     # num_categories_per_layer, hierarchy_tree = hp.get_hierarchy_info(labels)
