@@ -172,7 +172,7 @@ class HierarchicalDirichletProcess:
         
         self.hierarchical_distributions = []
         self.hyperparameters["DP"] = {}
-        self.generate_hierarchy_tree()
+        self.generate_hierarchical_distributions()
 
         self.distribution_indices = torch.zeros(self.batch_size, dtype=torch.int)
         self.distributions = torch.zeros(self.batch_size, self.latent_dimension)
@@ -340,7 +340,7 @@ class HierarchicalDirichletProcess:
             num_subcategories[index_string] = 1   
         self.number_of_subcategories.append(num_subcategories)
     
-    def generate_hierarchy_tree(self):
+    def generate_hierarchical_distributions(self):
         '''
         Generate the hierarchical tree from the label hierarchy
         '''
