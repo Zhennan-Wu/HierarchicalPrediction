@@ -156,6 +156,8 @@ class HierarchicalDirichletProcess:
 
         # a list of dictionaries, to record the number of subcategories in each layer
         self.number_of_subcategories = [] 
+        # a list of dictionaries, to record the number of samples in each category
+        self.hierarchical_observations = []
         # Initialize the base distribution
         beta = Gamma(1, 1).sample()
         self.hyperparameters["BASE"] = beta
@@ -173,6 +175,7 @@ class HierarchicalDirichletProcess:
         self.hierarchical_distributions = []
         self.hyperparameters["DP"] = {}
         self.generate_hierarchical_distributions()
+        self.hierarchical_prior = copy.deepcopy(self.hierarchical_distributions)
 
         self.distribution_indices = torch.zeros(self.batch_size, dtype=torch.int)
         self.distributions = torch.zeros(self.batch_size, self.latent_dimension)
@@ -317,7 +320,7 @@ class HierarchicalDirichletProcess:
 
         return torch.stack(label_hierarchy, dim=0).t()
 
-    def get_number_of_subcategories(self):
+    def get_number_of_subcategories_and_samples_counts(self):
         '''
         Get the number of subcategories in the Hierarchical Dirichlet Process
         '''
@@ -332,6 +335,10 @@ class HierarchicalDirichletProcess:
                 index_string = transfer_index_tensor_to_string(pc)
                 num_subcategories[index_string] = nc.item()   
             self.number_of_subcategories.append(num_subcategories)
+
+            parent_categories, number_of_observations = torch.unique(label_hierarchy[:, :l+1], dim=0, return_counts=True)
+            num_observations = dict(zip(parent_categories.tolist(), number_of_observations.tolist()))
+            self.hierarchical_observations.append(num_observations)
 
         parent_categories = torch.unique(label_hierarchy, dim=0)
         num_subcategories = {}
@@ -386,7 +393,32 @@ class HierarchicalDirichletProcess:
         self.smallest_category_distribution_on_labels = torch.tensor(category_distribution_on_labels)
         self.distribution_indices = Categorical(self.smallest_category_distribution_on_labels).sample()
         self.distributions = self.parameters[self.distribution_indices]
+
+    def update_posteriors(self):
+        '''
+        Update the posteriors of the Hierarchical Dirichlet Process
+        '''
+        posteriors = []
+        unique_values, counts = torch.unique(self.distribution_indices, return_counts=True)
+        evidence = torch.zeros(self.truncate_length)
+        evidence[unique_values] += counts
+        prior_param = self.hyperparameters["GLOBAL"].reshape(1,)
+        evidence_param = torch.cat(prior_param, evidence)
+        evidence_weights = Dirichlet(evidence_param).sample((self.truncate_length+1,))
+        prior_weight = evidence_weights[0]
+        likelihood_weight = evidence_weights[1:]
+        posterior = {"0": prior_weight * self.hierarchical_distributions[0]["BASE"] + likelihood_weight}
+        posteriors.append(posterior)
+        for l in range(self.layers):
+            pass
+        pass
         
+    def update_prior(self):
+        '''
+        Update the prior of the Hierarchical Dirichlet Process
+        '''
+        pass
+
     def _check_layer_constraints(self):
         '''
         Check if the layer constraints are satisfied
@@ -408,6 +440,7 @@ class HierarchicalDirichletProcess:
             for i in range(self.layers):
                 self.implied_constraints[i] = min(layer_index[i:])
 
+        
     # def filter_related_samples(self, sample_index: int, samples: torch.Tensor, hierarchy_params_tree: dict, filter_type: str):
     #     '''
     #     Filter the related samples based on the sample index and the hierarchical parameters tree
