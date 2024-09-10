@@ -170,9 +170,14 @@ class HierarchicalDirichletProcess:
         self.hyperparameters["GLOBAL"] = beta
         self.base_weight = self.generate_base_weights()
         
-        self.distributions = []
+        self.hierarchical_distributions = []
         self.hyperparameters["DP"] = {}
         self.generate_hierarchy_tree()
+
+        self.distribution_indices = torch.zeros(self.batch_size, dtype=torch.int)
+        self.distributions = torch.zeros(self.batch_size, self.latent_dimension)
+        self.smallest_category_distribution_on_labels = None
+        self.get_distributions()
 
     def print_hyperparameters(self):
         '''
@@ -180,11 +185,11 @@ class HierarchicalDirichletProcess:
         '''
         print(self.hyperparameters)
     
-    def print_distributions(self):
+    def print_hierarchical_distributions(self):
         '''
         Print the distributions of the Hierarchical Dirichlet Process
         '''
-        print(self.distributions)
+        print(self.hierarchical_distributions)
     
     def print_base_weights(self):
         '''
@@ -209,6 +214,24 @@ class HierarchicalDirichletProcess:
         Print the parameters of the Hierarchical Dirichlet Process
         '''
         print(self.parameters)
+
+    def print_distributions(self):
+        '''
+        Print the distributions of the Hierarchical Dirichlet Process
+        '''
+        print(self.distributions)
+    
+    def print_distribution_indices(self):
+        '''
+        Print the distribution indices of the Hierarchical Dirichlet Process
+        '''
+        print(self.distribution_indices)
+
+    def print_smallest_category_distribution_on_labels(self):
+        '''
+        Print the smallest category distribution on the labels of the Hierarchical Dirichlet Process
+        '''
+        print(self.smallest_category_distribution_on_labels)
 
     def generate_parameters(self):
         '''
@@ -332,7 +355,7 @@ class HierarchicalDirichletProcess:
             truncated_lengths = [self.truncate_length]*len(child_categories)
             params = list(zip(etas, weights, truncated_lengths))
             distributions = p.starmap(calc_sequential_stick_breaking_weight, params)
-        self.distributions.append(dict(zip(child_categories, distributions)))
+        self.hierarchical_distributions.append(dict(zip(child_categories, distributions)))
 
         for l in range(self.layers):
             parents = self.number_of_subcategories[l].keys()
@@ -346,13 +369,24 @@ class HierarchicalDirichletProcess:
             truncated_lengths = [self.truncate_length]*total_num_childs
             parents_weights = []
             for parent, nc in zip(parents, num_childs):
-                parents_weights += [self.distributions[l][parent]]*nc
+                parents_weights += [self.hierarchical_distributions[l][parent]]*nc
             
             with Pool(total_num_childs) as p:
                 params = list(zip(etas, parents_weights, truncated_lengths))
                 distributions = p.starmap(calc_sequential_stick_breaking_weight, params)
-            self.distributions.append(dict(zip(children, distributions)))
+            self.hierarchical_distributions.append(dict(zip(children, distributions)))
 
+    def get_distributions(self):
+        '''
+        Get the distribution of the Hierarchical Dirichlet Process
+        '''
+        category_indices = self.labels.tolist()
+        category_labels = [''.join(map(str, cat)) for cat in category_indices]
+        category_distribution_on_labels = [self.hierarchical_distributions[-1][cat] for cat in category_labels]
+        self.smallest_category_distribution_on_labels = torch.tensor(category_distribution_on_labels)
+        self.distribution_indices = Categorical(self.smallest_category_distribution_on_labels).sample()
+        self.distributions = self.parameters[self.distribution_indices]
+        
     def _check_layer_constraints(self):
         '''
         Check if the layer constraints are satisfied
@@ -851,12 +885,24 @@ if __name__ == "__main__":
     # print(dp.get_weights())
 
     hp = HierarchicalDirichletProcess(10, 3, 100, 10, {2: 10})
+    print("Base weights")
     hp.print_base_weights()
+    print("Parameters pool")
     hp.print_parameters()
+    print("HDP hyperparameters")
     hp.print_hyperparameters()
-    hp.print_distributions()  
+    print("Hierarchical distributions")
+    hp.print_hierarchical_distributions()
+    print("Labels")  
     hp.print_labels()
+    print("Number of subcategories")
     hp.print_number_of_subcategories()
+    print("Distribution indices of each label")
+    hp.print_distribution_indices()
+    print("Distribution parameters of each label")
+    hp.print_distributions()
+    print("Smallest category distribution on labels")
+    hp.print_smallest_category_distribution_on_labels()
 
     # labels = hp.generate_nCRP(50, 1)
     # print("labels")
