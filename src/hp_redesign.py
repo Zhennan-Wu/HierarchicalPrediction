@@ -158,6 +158,8 @@ class HierarchicalDirichletProcess:
         self.number_of_subcategories = [] 
         # a list of dictionaries, to record the number of samples in each category
         self.hierarchical_observations = []
+        # a list of dictionaries, to record label grouped by categories
+        self.labels_group_by_categories = []
         # Initialize the base distribution
         beta = Gamma(1, 1).sample()
         self.hyperparameters["BASE"] = beta
@@ -166,7 +168,7 @@ class HierarchicalDirichletProcess:
         eta = Gamma(1, 1).sample()
         self.hyperparameters["nCRP"] = eta
         self.labels = self.generate_nCRP()
-        self.get_number_of_subcategories()
+        self.summarize_group_info()
         # Record hierarchical distributions
         beta = Gamma(1, 1).sample()
         self.hyperparameters["GLOBAL"] = beta
@@ -235,6 +237,18 @@ class HierarchicalDirichletProcess:
         Print the smallest category distribution on the labels of the Hierarchical Dirichlet Process
         '''
         print(self.smallest_category_distribution_on_labels)
+
+    def print_labels_group_by_categories(self):
+        '''
+        Print the labels grouped by categories
+        '''
+        print(self.labels_group_by_categories)
+    
+    def print_hierarchical_observations(self):
+        '''
+        Print the hierarchical observations of the Hierarchical Dirichlet Process
+        '''
+        print(self.hierarchical_observations)
 
     def generate_parameters(self):
         '''
@@ -320,7 +334,7 @@ class HierarchicalDirichletProcess:
 
         return torch.stack(label_hierarchy, dim=0).t()
 
-    def get_number_of_subcategories_and_samples_counts(self):
+    def summarize_group_info(self):
         '''
         Get the number of subcategories in the Hierarchical Dirichlet Process
         '''
@@ -330,15 +344,18 @@ class HierarchicalDirichletProcess:
             child_categories = torch.unique(label_hierarchy[:, :l+2], dim=0)
             parent_categories, number_of_children = torch.unique(child_categories[:, :-1], dim=0, return_counts=True)
             
-            num_subcategories = {}
-            for pc, nc in zip(parent_categories, number_of_children):
-                index_string = transfer_index_tensor_to_string(pc)
-                num_subcategories[index_string] = nc.item()   
+            parent_keys = [transfer_index_tensor_to_string(pc) for pc in parent_categories]
+            num_subcategories = dict(zip(parent_keys, number_of_children.tolist()))
             self.number_of_subcategories.append(num_subcategories)
 
-            parent_categories, number_of_observations = torch.unique(label_hierarchy[:, :l+1], dim=0, return_counts=True)
-            num_observations = dict(zip(parent_categories.tolist(), number_of_observations.tolist()))
+            parent_categories, indices, number_of_observations = torch.unique(label_hierarchy[:, :l+1], dim=0, return_inverse = True, return_counts=True)
+            parent_keys = [transfer_index_tensor_to_string(pc) for pc in parent_categories]
+
+            num_observations = dict(zip(parent_keys, number_of_observations.tolist()))
             self.hierarchical_observations.append(num_observations)
+
+            samples_group_by_categories = dict(zip(parent_keys, indices.tolist()))
+            self.labels_group_by_categories.append(samples_group_by_categories)
 
         parent_categories = torch.unique(label_hierarchy, dim=0)
         num_subcategories = {}
@@ -407,8 +424,8 @@ class HierarchicalDirichletProcess:
         evidence_weights = Dirichlet(evidence_param).sample((self.truncate_length+1,))
         prior_weight = evidence_weights[0]
         likelihood_weight = evidence_weights[1:]
-        posterior = {"0": prior_weight * self.hierarchical_distributions[0]["BASE"] + likelihood_weight}
-        posteriors.append(posterior)
+        posterior = {"0": prior_weight * self.hierarchical_prior[0]["BASE"] + likelihood_weight}
+        self.hierarchical_distributions[0] = posterior
         for l in range(self.layers):
             pass
         pass
@@ -440,99 +457,25 @@ class HierarchicalDirichletProcess:
             for i in range(self.layers):
                 self.implied_constraints[i] = min(layer_index[i:])
 
-        
-    # def filter_related_samples(self, sample_index: int, samples: torch.Tensor, hierarchy_params_tree: dict, filter_type: str):
-    #     '''
-    #     Filter the related samples based on the sample index and the hierarchical parameters tree
-    #     '''
-    #     if (filter_type == "sample"):
-    #         pass
-    #     elif (filter_type == "table"):
-    #         pass
-    #     else:
-    #         raise ValueError("The filter type {} is not supported".format(filter_type))
-    #     pass
+    def group_labels_by_category(self):
+        '''
+        Group the labels by category
+        '''
+        pass
 
-    # def calc_conditional_density(self, samples: torch.Tensor, mixture_index: int, sample_index: int, hierarchy_params_tree: dict):
-    #     '''
-    #     Calculate the conditional density of the Hierarchical Dirichlet Process
-    #     '''
-    #     prior = self.global_dist["weights"].view(-1, 1)/torch.sum(self.global_dist["weights"]) 
+    def _get_level_params_for_posterior(self, level: int):
+        '''
+        Get the parameters for the posterior of the Hierarchical Dirichlet Process
 
-    #     related_samples = self.filter_related_samples(sample_index, mixture_index, samples, hierarchy_params_tree, "sample")
-    #     all_related_samples = torch.transpose(torch.cat((related_samples, samples[sample_index].view(1, -1)), dim=0), 0, 1)
-    #     related_samples = torch.transpose(related_samples, 0, 1)
-    #     # calculate denominator
-    #     log_joint_prob = torch.log(torch.inner(self.global_dist["values"]*prior, related_samples)) # dimension: number of parameter samples * number of samples
-    #     joint_prob = torch.exp(torch.sum(log_joint_prob, dim=-1))
-    #     likelihood_denominator = torch.sum(joint_prob)
+        Parameters:
+        - level (int): the level of the Hierarchical Dirichlet Process
 
-    #     # calculate nominator
-    #     log_joint_prob = torch.log(torch.inner(self.global_dist["values"]*prior, all_related_samples)) # dimension: number of parameter samples * number of samples
-    #     joint_prob = torch.exp(torch.sum(log_joint_prob, dim=-1))
-    #     likelihood_nominator = torch.sum(joint_prob)
-    #     cdf = likelihood_nominator/likelihood_denominator
-    #     return cdf
-    
-    # def get_sample_index_from_table_index(self, table_index: int, hierarchy_params_tree: dict):
-    #     '''
-    #     Get the sample index from the table index
-    #     '''
-    #     pass
+        Returns:
+        - prior_param (torch.Tensor): the prior parameters of the Hierarchical Dirichlet Process
+        - evidence_param (torch.Tensor): the evidence parameters of the Hierarchical Dirichlet Process
+        '''
 
-    # def calc_table_conditional_density(self, samples: torch.Tensor, mixture_index: int, table_index: int, hierarchy_params_tree: dict):
-    #     '''
-    #     Calculate the conditional density of the Hierarchical Dirichlet Process
-    #     '''
-    #     prior = self.global_dist["weights"].view(-1, 1)/torch.sum(self.global_dist["weights"]) 
 
-    #     related_samples = self.filter_related_samples(table_index, mixture_index, samples, hierarchy_params_tree, "table")
-    #     sample_index = self.get_sample_index_from_table_index(table_index, hierarchy_params_tree)
-    #     all_related_samples = torch.transpose(torch.cat((related_samples, samples[sample_index]), dim=0), 0, 1)
-    #     related_samples = torch.transpose(related_samples, 0, 1)
-    #     # calculate denominator
-    #     log_joint_prob = torch.log(torch.inner(self.global_dist["values"]*prior, related_samples)) # dimension: number of parameter samples * number of samples
-    #     joint_prob = torch.exp(torch.sum(log_joint_prob, dim=-1))
-    #     likelihood_denominator = torch.sum(joint_prob)
-
-    #     # calculate nominator
-    #     log_joint_prob = torch.log(torch.inner(self.global_dist["values"]*prior, all_related_samples)) # dimension: number of parameter samples * number of samples
-    #     joint_prob = torch.exp(torch.sum(log_joint_prob, dim=-1))
-    #     likelihood_nominator = torch.sum(joint_prob)
-    #     cdf = likelihood_nominator/likelihood_denominator
-    #     return cdf
-
-    # def calculate_posterior(self, samples: torch.Tensor, hierarchy_params_tree: dict, K: int, layer: int):
-    #     '''
-    #     Calculate the posterior of the nested Chinese Restaurant Process
-    #     '''
-    #     if (layer == 1):
-    #         global_new_probs = []
-    #         f_value = []
-    #         for sample in samples:
-    #             new_probs = []
-    #             for k in range(K):
-    #                 new_prob = self.calc_conditional_density(samples, k, sample, hierarchy_params_tree)
-    #                 f_value.append(new_prob)
-    #                 weight = 1 # remained to be completed
-    #                 new_probs.append(new_prob*weight)
-    #             global_new_probs.append(new_probs)
-    #         count = hierarchy_param_tree[0] # remained to be completed
-    #         posterior = torch.stack(f_value*count, global_new_probs)
-    #     elif (layer == 2):
-    #         global_new_probs = []
-    #         f_value = []
-    #         for sample in samples:
-    #             new_probs = []
-    #             for k in range(K):
-    #                 new_prob = self.calc_table_conditional_density(samples, k, sample, hierarchy_params_tree)
-    #                 f_value.append(new_prob)
-    #                 weight = 1
-    #                 new_probs.append(new_prob*weight)
-    #             global_new_probs.append(new_probs)
-    #         count = hierarchy_param_tree[0]
-    #         posterior = torch.stack(f_value*count, global_new_probs)
-    #     return posterior
 
     def _get_category_info(self, labels: Union[torch.Tensor, list], indices: Union[torch.Tensor, list]):
         '''
@@ -643,273 +586,7 @@ class HierarchicalDirichletProcess:
             labels.append(torch.tensor(p_labels))
         return labels
     
-    # def _extract_child_layer(self, parent_layer: list):
-    #     '''
-    #     Extract the child layers from the parent layers
-
-    #     Parameters:
-    #     - parent_layer (list): the parent layer of list of hierarchical dictionaries
-
-    #     Returns:    
-    #     - child_layer (list): the child layer of list of hierarchical dictionaries
-    #     '''
-    #     child_layer = []
-    #     counts = []
-    #     child_sample_sizes = []
-    #     for parent in parent_layer:
-    #         child = list(parent.values())
-    #         sample_size = []
-    #         for c in child:
-    #             leaves = jax.tree_util.tree_leaves(c)
-    #             sample_size.append(sum(leaves))
-    #         child_sample_sizes = child_sample_sizes + sample_size
-    #         count = len(child)
-    #         child_layer = child_layer + child
-    #         counts.append(count)
-    #     return child_layer, child_sample_sizes, counts
-
-    # def update_hierarchy_dict(self, Distributions: list, counts: list, labels: torch.Tensor, parent_hierarchy: dict = None):
-    #     '''
-    #     Update the hierarchy tree with the distributions
-    #     '''
-    #     child_dict = {}
-    #     distribution_params = []
-    #     for d in Distributions:
-    #         distribution_params.append(d.get_distribution())
-    #     if (parent_hierarchy is None):
-    #         child_keys = list(range(len(Distributions)))
-    #         child_keys = [str(key) for key in child_keys]
-    #         child_dict = dict(zip(child_keys, distribution_params))
-    #     else:
-    #         parent_keys = list(parent_hierarchy.keys())
-    #         if (len(parent_keys) != len(counts)):
-    #             raise ValueError("The number of parent keys {} should be equal to the number of counts {}".format(len(parent_keys), len(counts)))
-    #         child_keys = []
-    #         for key, count in zip(parent_keys, counts):
-    #             child_key =  []
-    #             for c in range(count):
-    #                 child_key.append(str(key) + str(c))
-    #             child_keys = child_keys + child_key
-    #         if (len(child_keys) != len(Distributions)):
-    #             raise ValueError("The number of child keys {} should be equal to the number of Distributions {}".format(len(child_keys), len(Distributions)))
-    #         child_dict = dict(zip(child_keys, distribution_params))
-    #     return child_dict
-
-    # def generate_parameters(self, sample_size: int, hierarchy_tree: dict, eta: float):
-    #     '''
-    #     Generate the parameters for the Hierarchical Dirichlet Process
-    #     '''
-    #     gamma = Gamma(1, 1).sample()
-    #     global_scale = 10
-    #     Global = DirichletProcess(gamma, global_scale*sample_size, self.global_dist) # Generate global pool
-    #     categorical_params = Global.get_distribution()
-    #     counts, hierarchy = jax.tree.flatten(hierarchy_tree)
-    #     counts_array = torch.tensor(counts)
-    #     hp_params_array = torch.zeros_like(counts_array)
-    #     hp_params = []
-    #     for idx, _ in enumerate(counts):
-    #         if (random.random() < eta/(eta + torch.dot(hp_params_array, counts_array).item())):
-    #             # Add a new label
-    #             new_label = categorical_params["values"][Categorical(categorical_params["weights"]).sample().item()]
-    #         else:
-    #             # Select an existing label
-    #             new_label = hp_params[Categorical(torch.tensor(counts[:idx])).sample().item()]    
-    #         hp_params.append(new_label)
-    #         hp_params_array[idx] = 1       
-    #     hierarchy_param_tree = jax.tree.unflatten(hierarchy, hp_params)
-    #     return hierarchy_param_tree
-
-    # def generate_HDP(self, sample_size: int, hierarchy_tree: dict, labels: torch.Tensor):
-    #     '''
-    #     Generate a Hierarchical Dirichlet Process
-    #     '''
-    #     HDP_distributions_no_duplicate = []
-    #     gamma = Gamma(1, 1).sample()
-    #     global_scale = 10
-    #     Global = DirichletProcess(gamma, global_scale*sample_size, self.global_dist) # Generate global pool
-    #     HDP_structure = []
-    #     HDP_distributions = []
-    #     HDP_sample_sizes = []
-    #     counts = [len(list(hierarchy_tree.keys()))]
-    #     HDP_distributions.append([Global.get_distribution()]*counts[0])
-    #     HDP_distributions_no_duplicate.append([Global.get_distribution()])
-    #     sample_sizes = []
-    #     for c in list(hierarchy_tree.values()):
-    #         leaves = jax.tree_util.tree_leaves(c)
-    #         sample_sizes.append(sum(leaves))
-    #     HDP_sample_sizes.append(sample_sizes)
-    #     level = list(hierarchy_tree.values())
-    #     for l in range(self.layers):
-    #         alpha = Gamma(1, 1).sample()
-    #         base = HDP_distributions[-1]
-    #         base_sample_sizes = HDP_sample_sizes[-1] # Get how many samples are in each category
-    #         alpha_list = [alpha.item()]*len(base_sample_sizes) # Get the alpha value for each category
-    #         param = list(zip(alpha_list, base_sample_sizes, base))
-    #         print("Layer: ", l)
-    #         print("Param: ", param)
-    #         with Pool(len(base)) as p:
-    #             DPs = p.starmap(DirichletProcess, param)
-    #         if (l == 0):
-    #             # Generate the first layer of the HDP
-    #             HDP_structure.append(self.update_hierarchy_dict(DPs, counts, labels))
-    #         else:
-    #             # Generate the rest of the layers of the HDP
-    #             HDP_structure.append(self.update_hierarchy_dict(DPs, counts, labels, HDP_structure[-1]))
-    #         if (l < self.layers - 1):
-    #             level, sample_sizes, counts = self._extract_child_layer(level)
-    #             child_distributions = []
-    #             child_distributions_no_duplicate = []
-    #             if (len(counts) != len(DPs)):
-    #                 raise ValueError("The number of child layers {} should be equal to the number of Dirichlet Processes {}".format(len(counts), len(DPs)))
-    #             for count, DP in zip(counts, DPs):
-    #                 child_distributions_no_duplicate.append(DP.get_distribution())
-    #                 next_base = [DP.get_distribution()]*count
-    #                 child_distributions = child_distributions + next_base
-    #             HDP_distributions.append(child_distributions)
-    #             HDP_sample_sizes.append(sample_sizes)
-    #             HDP_distributions_no_duplicate.append(child_distributions_no_duplicate)
-    #         else:
-    #             sample_sizes = level
-    #             counts = [1]*len(level)
-    #             child_distributions = []
-    #             child_distributions_no_duplicate = []
-    #             if (len(counts) != len(DPs)):
-    #                 raise ValueError("The number of child layers {} should be equal to the number of Dirichlet Processes {}".format(len(counts), len(DPs)))
-    #             for count, DP in zip(counts, DPs):
-    #                 child_distributions_no_duplicate.append(DP.get_distribution())
-    #                 next_base = [DP.get_distribution()]*count
-    #                 child_distributions = child_distributions + next_base
-    #             HDP_distributions_no_duplicate.append(child_distributions_no_duplicate)
-    #             HDP_distributions.append(child_distributions)
-    #             HDP_sample_sizes.append(sample_sizes)
-    #     self._check_nCRP_HDP_match(labels, HDP_structure)
-    #     return HDP_distributions_no_duplicate, HDP_structure
-
-    # def record_active_params(self, top_level_HDP_structure: dict):
-    #     '''
-    #     Record the active parameters in the Hierarchical Dirichlet Process
-    #     '''
-    #     for top_class in top_level_HDP_structure.keys():
-    #         for value, weight in zip(top_level_HDP_structure[top_class]["values"], top_level_HDP_structure[top_class]["weights"]):
-    #             if value in self.activate_params.keys():
-    #                 self.activate_params[value] += weight
-    #             else:
-    #                 self.activate_params[value] = weight
-
-    # def _check_nCRP_HDP_match(self, nCRP_hierarchy: torch.Tensor, HDP_hierarchy: list):
-    #     '''
-    #     Check if the nCRP and HDP hierarchies match
-    #     '''
-    #     for idx, level_HDP in enumerate(HDP_hierarchy):
-    #         level_nCRP = nCRP_hierarchy[:, :idx+1]
-    #         level_nCRP_list = level_nCRP.tolist()
-    #         level_nCRP_keys = [''.join(map(str, row)) for row in level_nCRP_list]
-    #         for key in level_nCRP_keys:
-    #             if key not in level_HDP.keys():
-    #                 raise ValueError("The nCRP hierarchy {} does not match the HDP hierarchy {}".format(key, list(level_HDP.keys())))
-    #     print("The nCRP hierarchy matches the HDP hierarchy")
-        
-    # def visualize_HDP(self, HDP_distributions: list, labels: torch.Tensor):
-    #     '''
-    #     Visualize the Hierarchical Dirichlet Process
-    #     '''
-    #     for l, distributions in enumerate(HDP_distributions):
-    #         print("Layer: ", l)
-    #         print("Number of subclass: ", len(distributions))
-    #         for d in distributions:
-    #             print("Values: ", d["values"], "Weights: ", d["weights"])
     
-    # def calculate_likelihood(self, variable_indices, HDP_distributions: list, labels: torch.Tensor):
-    #     '''
-    #     Calculate the likelihood of the Hierarchical Dirichlet Process
-    #     '''
-    #     pass
-
-    # def infer_HDP(self, HDP_distributions: list, labels: torch.Tensor, hdp_structure: list):
-    #     '''
-    #     Infer the Hierarchical Dirichlet Process layer by layer
-    #     '''
-        
-    #     pass
-    
-    # def match_HDP(self, HDP_distributions: list, hierarchy_tree: dict):
-    #     '''
-    #     Match the Hierarchical Dirichlet Process
-    #     '''
-    #     pass
-
-    # def infer_nCRP(self, labels: torch.Tensor, hierarchy_tree: dict):
-    #     '''
-    #     Infer the nested Chinese Restaurant Process
-    #     '''
-    #     augmented_tree = add_key_to_nested_dict(hierarchy_tree, -1, 0.5) # Exact key and alpha value remain to be determined
-    #     category_indices = self.get_flat_index(augmented_tree, labels)
-    #     category_counts = torch.tensor(jax.tree_util.tree_leaves(augmented_tree))
-    #     augmented_structure = jax.tree.structure(augmented_tree)
-    #     prior_params = self.generate_categorical_parameters(category_indices, category_counts)
-    #     likelihood_params = self.get_likelihood_params(prior_params)
-    #     posterior_params = self.calculate_posterior(prior_params, likelihood_params)
-
-    #     new_categories = torch.distributions.Categorical(posterior_params).sample()
-    #     new_augmented_tree = self.update_categories(new_categories, category_counts, augmented_structure)
-    #     new_hierarchy_tree = modify_key_to_nested_dict(new_augmented_tree, -1, 0.5) # Exact key and alpha value remain to be determined
-    #     return new_hierarchy_tree
-
-    # def calculate_conditional_density(self, mixture_index: int, sample_index: tuple, labels: torch.Tensor, hierarchy_tree: dict):
-    #     '''
-    #     Calculate the conditional density of the nested Chinese Restaurant Process
-    #     '''
-    #     pass
-
-    # def calculate_posterior(self, prior_params: torch.Tensor, likelihood_params: torch.Tensor):
-    #     '''
-    #     Calculate the posterior of the nested Chinese
-    #     '''
-    #     pass
-
-    # def get_likelihood_params(self, prior_params: torch.Tensor):
-    #     '''
-    #     Get the likelihood parameters
-    #     '''
-    #     pass
-
-    # def infer_DP_distributions(self, hierarchy_tree: dict, labels: torch.Tensor):
-    #     '''
-    #     Infer the Dirichlet Process distributions
-    #     '''
-    #     pass 
-
-    # def generate_categorical_parameters(self, category_indices: torch.Tensor, category_counts: torch.Tensor):
-    #     '''
-    #     Generate the categorical parameters for the nested Chinese Restaurant Process
-    #     '''
-    #     params = torch.unsqueeze(category_counts, dim=0)
-    #     params = params.repeat(category_indices.shape[0], 1)
-    #     params[torch.arange(params.size(0)), category_indices] -= 1
-    #     return params
-
-    # def update_categories(self, category_indices: torch.Tensor, category_counts: torch.Tensor, structure: Any):
-    #     '''
-    #     Generate the categorical parameters for the nested Chinese Restaurant Process
-    #     '''
-    #     params = torch.unsqueeze(category_counts, dim=0)
-    #     params = params.repeat(category_indices.shape[0], 1)
-    #     params[torch.arange(params.size(0)), category_indices] += 1
-    #     new_augmented_tree = jax.tree_util.tree_unflatten(structure, params)
-
-    #     return new_augmented_tree
-
-    # def get_flat_index(self, hierarchy_tree: dict, labels: torch.Tensor):
-    #     '''
-    #     Get the flat index of the labels
-    #     '''
-    #     distributions = torch.tensor(jax.tree_util.tree_leaves(hierarchy_tree))
-    #     flat_categories = torch.cumsum(distributions, dim=0)
-    #     sorted_indices = sort_by_columns_with_original_indices(labels)
-    #     category_indices = find_indices_of_smallest_entries_bigger_than(flat_categories, sorted_indices)
-        
-    #     return category_indices
-
 
 if __name__ == "__main__":
     # dp = DirichletProcess(1)
@@ -936,6 +613,11 @@ if __name__ == "__main__":
     hp.print_distributions()
     print("Smallest category distribution on labels")
     hp.print_smallest_category_distribution_on_labels()
+    print("Labels grouped by categories")
+    hp.print_labels_group_by_categories()
+    print("Hierarchical observations")
+    hp.print_hierarchical_observations()
+
 
     # labels = hp.generate_nCRP(50, 1)
     # print("labels")
