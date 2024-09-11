@@ -274,7 +274,7 @@ class HierarchicalDirichletProcess:
             weights.append(pi_value)
             remaining_weight *= (1 - pi_prime)
            
-        if (sum(weights) > 1):
+        if (sum(weights) > 1 + 1e-3):
             raise ValueError("The sum of the weights should be smaller than 1, instead got {}".format(sum(weights)))
         return weights
     
@@ -354,7 +354,8 @@ class HierarchicalDirichletProcess:
             num_observations = dict(zip(parent_keys, number_of_observations.tolist()))
             self.hierarchical_observations.append(num_observations)
 
-            samples_group_by_categories = dict(zip(parent_keys, indices.tolist()))
+            categorized_samples = [torch.where(indices == i)[0] for i in range(parent_categories.shape[0])]
+            samples_group_by_categories = dict(zip(parent_keys, categorized_samples))
             self.labels_group_by_categories.append(samples_group_by_categories)
 
         parent_categories = torch.unique(label_hierarchy, dim=0)
@@ -474,8 +475,40 @@ class HierarchicalDirichletProcess:
         - prior_param (torch.Tensor): the prior parameters of the Hierarchical Dirichlet Process
         - evidence_param (torch.Tensor): the evidence parameters of the Hierarchical Dirichlet Process
         '''
+        parent_categories = self.number_of_subcategories[level-1].keys()
+        child_categories = self.number_of_subcategories[level].keys()
+        parent_child_pairs = {}
+        for pc in parent_categories:
+            parent_child_pairs[pc] = []
+            for cc in child_categories:
+                if (pc == cc[:,-1]):
+                    parent_child_pairs[pc].append(cc)
+        params = []
+        for child in child_categories:
+            count = self._count_parameters_in_categories(child, level)
+            prior_param = self.hyperparameters["DP"][child]
+            prior = self.hierarchical_distributions[level-1][child[:-1]]
+            params.append(tuple(count.sum().item(), (prior * prior_param + count)/(prior_param + count.sum())))
+        return params
 
+    def _count_parameters_in_categories(self, categories: str, level: int):
+        '''
+        Count the number of parameters in the categories
 
+        Parameters:
+        - categories (str): the categories to count the parameters
+        - level (int): the level of the Hierarchical Dirichlet Process
+
+        Returns:
+        - num_parameters (int): the number of parameters in the categories
+        '''
+        indice = self.labels_group_by_categories[level][categories]
+        parameters = self.distribution_indices[indice]
+        unique_parameters, count = torch.unique(parameters, return_counts=True)
+        param_count = torch.zeros(self.truncate_length)
+        param_count[unique_parameters.flatten()] += count
+        return param_count
+        
 
     def _get_category_info(self, labels: Union[torch.Tensor, list], indices: Union[torch.Tensor, list]):
         '''
