@@ -200,6 +200,16 @@ class HierarchicalDirichletProcess:
         # list of dict: the hierarchical distributions of the Hierarchical Dirichlet Process
         #  - key: the parent category
         #  - value: the weights on all the available parameters (self.truncate_length is the total number of parameters)
+        
+        self.hierarchical_prior = []
+        # list of dict: the hierarchical prior of the Hierarchical Dirichlet Process
+        #  - key: the parent category
+        #  - value: the prior of the parameters
+
+        self.hierarchical_posterior = []
+        # list of dict: the hierarchical posterior of the Hierarchical Dirichlet Process
+        #  - key: the parent category
+        #  - value: the posterior of the parameters
 
         self.cumulative_weights = []
         # list of dict: the cumulative weights of all parameters in each category in each level across different batches
@@ -214,9 +224,6 @@ class HierarchicalDirichletProcess:
 
         self.smallest_category_distribution_on_labels = None
         # torch.Tensor: the basic distribution over parameters of all the labels
-
-        self.hierarchy_tree = {}
-        # Pytree: the categorical tree structure of the observations with leaf nodes as the the counts  and the parameter distribution under each category
 
         ################################################################################################
         # Generate all the available parameters
@@ -314,12 +321,6 @@ class HierarchicalDirichletProcess:
         Print the cumulative weights of the Hierarchical Dirichlet Process
         '''
         print(self.cumulative_weights)
-    
-    def print_hierarchy_tree(self):
-        '''
-        Print the observation tree of the Hierarchical Dirichlet Process
-        '''
-        print(self.hierarchy_tree)
 
     def generate_parameters(self):
         '''
@@ -515,38 +516,48 @@ class HierarchicalDirichletProcess:
                 unique_parameters, count = torch.unique(parameters, return_counts=True)
                 param_count = torch.zeros(self.truncate_length)
                 param_count[unique_parameters.flatten()] += count
-                self.cumulative_weights[level][category]+= param_count   
+                if (category not in self.cumulative_weights[level].keys()):
+                    self.cumulative_weights[level][category] = param_count
+                else:
+                    self.cumulative_weights[level][category] += param_count
         
     def posterior_update_of_distributions(self):
         '''
         Update the posteriors of the Hierarchical Dirichlet Process
         '''
         unique_values, counts = torch.unique(self.latent_distribution_indices, return_counts=True)
-        evidence = torch.zeros(self.truncate_length) + torch.tensor(sum(self.cumulative_weights[0].values()))
+        if (len(self.cumulative_weights) == 0):
+            evidence = torch.zeros(self.truncate_length)
+        else:
+            evidence = sum(self.cumulative_weights[0].values())
         evidence[unique_values] += counts
         prior_param = self.hyperparameters["GLOBAL"].reshape(1,) 
-        evidence_param = torch.cat(prior_param, evidence)
-        evidence_weights = Dirichlet(evidence_param).sample((self.truncate_length+1,))
+        evidence_param = torch.cat([prior_param, evidence], dim = 0)
+        evidence_param = torch.clamp(evidence_param, min=0.1)
+        evidence_weights = Dirichlet(evidence_param).sample()
         prior_weight = evidence_weights[0]
         likelihood_weight = evidence_weights[1:]
-        self.base_weight = prior_weight * self.base_weight + likelihood_weight
+        base_weight = prior_weight * self.base_weight + likelihood_weight
 
-        hierarchical_distributions = []
         # First level
         child_categories = self.number_of_subcategories[0].keys()
-        etas = [self.hyperparameters["DP"][child] + self.cumulative_weights[0][child] for child in child_categories]
-
+        etas = [self.hyperparameters["DP"][child] + torch.sum(self._count_parameters_in_categories(child, 0)).item() for child in child_categories]
         with Pool(len(child_categories)) as p:
-            weights = [self.base_weight]*len(child_categories)
+            weights = [base_weight]*len(child_categories)
             truncated_lengths = [self.truncate_length]*len(child_categories)
             params = list(zip(etas, weights, truncated_lengths))
             distributions = p.starmap(calc_sequential_stick_breaking_weight, params)
-        hierarchical_distributions.append(dict(zip(child_categories, distributions)))
+        self.hierarchical_distributions[0].update(dict(zip(child_categories, distributions)))
+        # Other levels
         for l in range(self.layers-1):
-            with Pool(len(self.number_of_subcategories[l].keys())) as p:
-                params = self._get_level_params_for_posterior(l)
+            with Pool(len(self.number_of_subcategories[l+1].keys())) as p:
+                params = self._get_level_params_for_posterior(l+1)
                 posteriors = p.starmap(calc_sequential_stick_breaking_weight, params)
-            self.hierarchical_distributions[l+1] = dict(zip(self.hierarchical_distributions[l+1].keys(), posteriors))
+            self.hierarchical_distributions[l+1].update(dict(zip(self.number_of_subcategories[l+1].keys(), posteriors)))
+        # Base distribution over parameters
+        category_labels = [''.join(map(str, cat)) for cat in self.labels.tolist()]
+        category_distribution_on_labels = [self.hierarchical_distributions[-1][cat] for cat in category_labels]
+        self.smallest_category_distribution_on_labels = torch.stack(category_distribution_on_labels)
 
     def posterior_update_of_labels(self):
         '''
@@ -554,19 +565,16 @@ class HierarchicalDirichletProcess:
         '''
         observation_tree = self._generate_hierarchy_tree()
         augment_tree = self._augment_hierarchy_tree(observation_tree)
-        v_counts, v_params, labels = self._separate_trees(augment_tree)
-        str_labels = [''.join(map(str, label)) for label in self.labels]
-        indices = []
-        for idx, label in enumerate(str_labels):
-            indices.append((idx, torch.where(labels == label)[0]))
-        rows, cols = zip(*indices)
-        v_counts[rows, cols] -= 1
-        likelihood = v_params[torch.arange(self.batch_size), self.latent_distribution_indices, :]
+        v_counts, v_params, tree_labels = self._separate_trees(augment_tree)
+        str_labels = [''.join(map(str, label)) for label in self.labels.tolist()]
+        indices = [tree_labels.index(label) for label in str_labels]
+        v_counts[torch.arange(self.batch_size), torch.tensor(indices)] -= 1
+        likelihood = v_params[torch.arange(self.batch_size), torch.tensor(indices), self.latent_distribution_indices]
         posterior = likelihood * v_counts
-        new_label_indices = Categorical(posterior).sample()
-        new_labels = labels[new_label_indices]
+        new_label_indices = Categorical(posterior/posterior.sum(dim=1, keepdim=True)).sample()
+        new_labels = [tree_labels[idx] for idx in new_label_indices.tolist()]
         label_ref = set(str_labels)
-        new_label_ref = set(new_labels.tolist())
+        new_label_ref = set(new_labels)
         if (not new_label_ref.issubset(label_ref)):
             # Generate new dsitributions and corresponding counts
             new_categories = list(new_label_ref - label_ref)
@@ -583,15 +591,14 @@ class HierarchicalDirichletProcess:
         '''
         Update the Hierarchical Dirichlet Process using Gibbs Sampling
         '''
-        concatenated_data = torch.cat(data, dim=1)
-        for _ in range(number_of_iterations):
+        concatenated_data = torch.sum(data, dim=1)
+        for round in range(number_of_iterations):
+            print("Gibbs Update Round {}".format(round))
             self.posterior_update_of_params(concatenated_data)
             self.posterior_update_of_distributions()
             self.posterior_update_of_labels()
-            self.summarize_distributions()
-        
         self.update_cumulated_weights()
-        
+
     def _increase_categories(self, new_categories: list): 
         '''
         Increase the categories of the Hierarchical Dirichlet Process
@@ -599,8 +606,13 @@ class HierarchicalDirichletProcess:
         for new_cat in new_categories:
             for pi in range(len(new_cat)):
                 parent_cat = new_cat[:pi+1]
-                if (parent_cat not in self.self.hierarchical_distributions[pi].keys()):
-                    self.hierarchical_distributions[pi][parent_cat] = calc_sequential_stick_breaking_weight(self.hyperparameters["DP"][parent_cat[:-1]], self.hierarchical_distributions[pi-1][parent_cat-1], self.truncate_length)
+                print("len", pi)
+                print("hierarchical", len(self.hierarchical_distributions))
+                if (parent_cat not in self.hierarchical_distributions[pi].keys()):
+                    if (pi > 0):
+                        self.hierarchical_distributions[pi][parent_cat] = calc_sequential_stick_breaking_weight(self.hyperparameters["DP"][parent_cat], self.hierarchical_distributions[pi-1][parent_cat[:-1]], self.truncate_length)
+                    else:
+                        self.hierarchical_distributions[pi][parent_cat] = calc_sequential_stick_breaking_weight(self.hyperparameters["DP"][parent_cat], self.base_weight, self.truncate_length)
 
     def _decrease_categories(self, categories_to_remove: list):
         '''
@@ -609,8 +621,18 @@ class HierarchicalDirichletProcess:
         for cat in categories_to_remove:
             for pi in range(len(cat)):
                 parent_cat = cat[:pi+1]
-                if (parent_cat in self.hierarchical_distributions[pi].keys() and parent_cat not in self.cumulative_weights[pi].keys()):
-                    self.hierarchical_distributions[pi].pop(parent_cat)
+                if (len(self.cumulative_weights) == 0):
+                    if (parent_cat in self.hierarchical_distributions[pi].keys()):
+                        self.hierarchical_distributions[pi].pop(parent_cat)
+                        self.number_of_subcategories[pi].pop(parent_cat)
+                        self.labels_group_by_categories[pi].pop(parent_cat)
+                        self.hierarchical_observations[pi].pop(parent_cat)
+                else:
+                    if (parent_cat in self.hierarchical_distributions[pi].keys() and parent_cat not in self.cumulative_weights[pi].keys()):
+                        self.hierarchical_distributions[pi].pop(parent_cat)
+                        self.number_of_subcategories[pi].pop(parent_cat)
+                        self.labels_group_by_categories[pi].pop(parent_cat)
+                        self.hierarchical_observations[pi].pop(parent_cat)
 
     def _generate_hierarchy_tree(self):
         '''
@@ -627,6 +649,13 @@ class HierarchicalDirichletProcess:
                         tree_level[pc] = {cc: {}}
                     else:
                         tree_level[pc][cc] = {}
+                if (len(self.cumulative_weights) > 0):
+                    for cc in self.cumulative_weights[l+1].keys():
+                        pc = cc[:-1]
+                        if (pc not in tree_level.keys()):
+                            tree_level[pc] = {cc: {}}
+                        else:
+                            tree_level[pc][cc] = {}
                 tree_level = tree_level.values()
             else:
                 new_level = []
@@ -636,11 +665,26 @@ class HierarchicalDirichletProcess:
                         if (pc in tree.keys()):
                             tree[pc][cc] = {}
                     new_level += tree.values()
+                    if (len(self.cumulative_weights) > 0):
+                        for cc in self.cumulative_weights[l+1].keys():
+                            pc = cc[:-1]
+                            if (pc in tree.keys()):
+                                tree[pc][cc] = {}
                 tree_level = new_level
         for tree in tree_level:
-            for cc in self.number_of_subcategories[-1].keys():
+            if (len(self.cumulative_weights) > 0):
+                total_leaf_keys = set(list(self.number_of_subcategories[-1].keys()) + list(self.cumulative_weights[-1].keys()))
+            else:
+                total_leaf_keys = list(self.number_of_subcategories[-1].keys())
+            for cc in total_leaf_keys:
                 if (cc in tree.keys()):
-                    tree[cc] = {'count': self.hierarchical_observations[-1][cc], "params": self.hierarchical_distributions[-1][cc], 'label': cc}
+                    observation = torch.tensor([0]) 
+                    if (len(self.cumulative_weights) > 0):
+                        if (cc in self.cumulative_weights[-1].keys()):
+                            observation += self.cumulative_weights[-1][cc]
+                    if (cc in self.hierarchical_observations[-1].keys()):
+                        observation += self.hierarchical_observations[-1][cc]
+                    tree[cc] = (observation, cc, self.hierarchical_distributions[-1][cc])
         return root
 
     def _augment_hierarchy_tree(self, observation_tree):
@@ -652,6 +696,7 @@ class HierarchicalDirichletProcess:
             if (l == 0):
                 num_categories = len(tree_level.keys())
                 tree_level[str(num_categories)] = {'parent': str(num_categories)}
+                self.hyperparameters["DP"][str(num_categories)] = Gamma(1, 1).sample().item()
                 tree_level = tree_level.values()
             elif (l == self.layers - 1):
                 for tree in tree_level:
@@ -661,7 +706,8 @@ class HierarchicalDirichletProcess:
                         prefix = list(tree.keys())[0][:-1]
                     num_categories = len(tree.keys())
                     new_value = prefix + str(num_categories)
-                    tree[new_value] = {'count': self.hyperparameters["nCRP"].item(), 'params': self.base_weight}
+                    tree[new_value] = (self.hyperparameters["nCRP"].item(), new_value, self.base_weight)
+                    self.hyperparameters["DP"][new_value] = Gamma(1, 1).sample().item()
             else:
                 new_values = []
                 for tree in tree_level:
@@ -672,6 +718,7 @@ class HierarchicalDirichletProcess:
                     num_categories = len(tree.keys())
                     new_value = prefix + str(num_categories)
                     tree[new_value] = {'parent': new_value}
+                    self.hyperparameters["DP"][new_value] = Gamma(1, 1).sample().item()
                     new_values += tree.values()
                 tree_level = new_values
         return observation_tree
@@ -685,13 +732,16 @@ class HierarchicalDirichletProcess:
         params = []
         labels = []
         flatten_leaves = jax.tree.leaves(augment_tree)
-        for leaf in flatten_leaves:
-            counts.append(leaf['count'])
-            params.append(leaf['params'])
-            labels.append(leaf['label'])
+        for idx, leaf in enumerate(flatten_leaves):
+            position = idx % 3
+            if (position == 0):
+                counts.append(leaf)
+            elif (position == 1):
+                labels.append(leaf)
+            else:
+                params.append(leaf)
         counts = torch.tensor(counts)
         params = torch.stack(params).t()
-        labels = torch.tensor(labels)
         vectorized_counts = torch.stack([counts]*self.batch_size)
         vectorized_params = torch.stack([params]*self.batch_size)
         return vectorized_counts, vectorized_params, labels
@@ -734,17 +784,17 @@ class HierarchicalDirichletProcess:
         for pc in parent_categories:
             parent_child_pairs[pc] = []
             for cc in child_categories:
-                if (pc == cc[:,-1]):
+                if (pc == cc[:-1]):
                     parent_child_pairs[pc].append(cc)
         params = []
         for child in child_categories:
-            count = self._count_parameters_in_categories(child, level) + self.cumulative_weights[level][child]
+            count = self._count_parameters_in_categories(child, level)
             prior_param = self.hyperparameters["DP"][child]
-            prior = self.hierarchical_distributions[level-1][child[:-1]]
-            params.append(tuple(count.sum().item(), (prior * prior_param + count)/(prior_param + count.sum())))
+            parent_dist = self.hierarchical_distributions[level-1][child[:-1]]
+            params.append(tuple([count.sum().item()+prior_param, (parent_dist * prior_param + count)/(prior_param + count.sum()), self.truncate_length]))
         return params
 
-    def _count_parameters_in_categories(self, categories: str, level: int):
+    def _count_parameters_in_categories(self, category: str, level: int):
         '''
         Count the number of parameters in the categories
 
@@ -755,12 +805,14 @@ class HierarchicalDirichletProcess:
         Returns:
         - num_parameters (int): the number of parameters in the categories
         '''
-        indice = self.labels_group_by_categories[level][categories]
+        indice = self.labels_group_by_categories[level][category]
         parameters = self.latent_distribution_indices[indice]
         unique_parameters, count = torch.unique(parameters, return_counts=True)
-        param_count = torch.zeros(self.truncate_length)
+        if (len(self.cumulative_weights) == 0):
+            param_count = torch.zeros(self.truncate_length)
+        else:   
+            param_count = self.cumulative_weights[level][category]
         param_count[unique_parameters.flatten()] += count
-        param_count += self.cumulative_weights[level][categories]
         return param_count
         
     def _get_category_info(self, labels: Union[torch.Tensor, list], indices: Union[torch.Tensor, list]):
@@ -875,33 +927,40 @@ class HierarchicalDirichletProcess:
     
 if __name__ == "__main__":
 
-    hp = HierarchicalDirichletProcess(10, 3, 100, 10, {2: 10})
-    print("Base weights")
-    hp.print_base_weights()
-    print("Parameters pool")
-    hp.print_parameters()
+    hp = HierarchicalDirichletProcess(10, 3, 60, 10, {2: 10})
+    # print("Base weights")
+    # hp.print_base_weights()
+    # print("Parameters pool")
+    # hp.print_parameters()
     print("HDP hyperparameters")
     hp.print_hyperparameters()
     print("Hierarchical distributions")
     hp.print_hierarchical_distributions()
-    print("Labels")  
-    hp.print_labels()
+    # print("Labels")  
+    # hp.print_labels()
     print("Number of subcategories")
     hp.print_number_of_subcategories()
-    print("Distribution indices of each label")
-    hp.print_latent_distribution_indices()
-    print("Distribution parameters of each label")
-    hp.print_latent_distributions()
-    print("Smallest category distribution on labels")
-    hp.print_smallest_category_distribution_on_labels()
-    print("Labels grouped by categories")
-    hp.print_labels_group_by_categories()
+    # print("Distribution indices of each label")
+    # hp.print_latent_distribution_indices()
+    # print("Distribution parameters of each label")
+    # hp.print_latent_distributions()
+    # print("Smallest category distribution on labels")
+    # hp.print_smallest_category_distribution_on_labels()
+    # print("Labels grouped by categories")
+    # hp.print_labels_group_by_categories()
     print("Hierarchical observations")
     hp.print_hierarchical_observations()
-    print("Tree")
-    hp.print_hierarchy_tree()
-    print(hp.augment_hierarchy_tree())
 
+    params1 = torch.rand(10)
+    params2 = torch.rand(10)
+    params3 = torch.rand(10)
+    data = []
+    data.append(Dirichlet(params1).sample((20, 3, )))
+    data.append(Dirichlet(params2).sample((20, 3, )))
+    data.append(Dirichlet(params3).sample((20, 3, )))
+    data = torch.cat(data, dim = 0)
+    print(data.shape)
+    hp.gibbs_update(100, data)
 
     # labels = hp.generate_nCRP(50, 1)
     # print("labels")
