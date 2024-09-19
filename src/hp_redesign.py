@@ -13,11 +13,11 @@ import random
 from pyro.distributions import Dirichlet, Gamma, Categorical
 from torch.multiprocessing import Pool
 from typing import Any, Union, List, Tuple, Dict
-from jax.tree_util import PyTreeDef
-from utils import TreeNode, Tree
 
 import matplotlib.pyplot as plt
 import numpy as np
+
+import gc
 
 PyTree = Union[jnp.ndarray, List['PyTree'], Tuple['PyTree', ...], Dict[Any, 'PyTree']]
 
@@ -142,6 +142,7 @@ def calc_sequential_stick_breaking_weight(alpha: float, parent_weights: list, nu
         child_weights.append(pi_final)
     return torch.tensor(child_weights)
 
+
 def transfer_index_tensor_to_tuple(index: torch.Tensor):
     '''
     Transfer the index tensor to string
@@ -155,6 +156,7 @@ def transfer_index_tensor_to_tuple(index: torch.Tensor):
             index_tuple.append(tuple(index))
     return index_tuple
 
+
 def transfer_index_tuple_to_tensor(indices: list):
     '''
     Transfer the index tuple to tensor
@@ -163,6 +165,7 @@ def transfer_index_tuple_to_tensor(indices: list):
     for index in indices:
         index_tensor.append(torch.tensor(index))
     return torch.stack(index_tensor)
+
 
 class HierarchicalDirichletProcess:
     def __init__(self, latent_dimension: int, layers: int, batch_size: int, truncated_length: int, fixed_layers: dict = None):
@@ -268,6 +271,7 @@ class HierarchicalDirichletProcess:
         eta = Gamma(1, 1).sample()
         self.hyperparameters["nCRP"] = eta
         self.labels = self.generate_nCRP()
+        self.labels_in_tuple = transfer_index_tensor_to_tuple(self.labels)
         self.number_of_subcategories, self.hierarchical_observations, self.labels_group_by_categories = self.summarize_group_info()
         ################################################################################################
         # Initialize the hierarchical distributions
@@ -460,21 +464,20 @@ class HierarchicalDirichletProcess:
         '''
         Get the number of subcategories in the Hierarchical Dirichlet Process
         '''
-        label_hierarchy = self.labels
         number_of_subcategories = []
         hierarchical_observations = []
         labels_group_by_categories = []
 
         for l in range(self.layers):
             if (l != self.layers - 1):
-                child_categories = torch.unique(label_hierarchy[:, :l+2], dim=0)
+                child_categories = torch.unique(self.labels[:, :l+2], dim=0)
                 parent_categories, number_of_children = torch.unique(child_categories[:, :-1], dim=0, return_counts=True)
             
                 parent_keys = transfer_index_tensor_to_tuple(parent_categories)
                 one_layer_num_subcategories = dict(zip(parent_keys, number_of_children.tolist()))
                 number_of_subcategories.append(one_layer_num_subcategories)   
 
-            parent_categories, indices, number_of_observations = torch.unique(label_hierarchy[:, :l+1], dim=0, return_inverse = True, return_counts=True)
+            parent_categories, indices, number_of_observations = torch.unique(self.labels[:, :l+1], dim=0, return_inverse = True, return_counts=True)
             parent_keys = transfer_index_tensor_to_tuple(parent_categories)
 
             num_observations = dict(zip(parent_keys, number_of_observations.tolist()))
@@ -484,7 +487,7 @@ class HierarchicalDirichletProcess:
             samples_group_by_categories = dict(zip(parent_keys, categorized_samples))
             labels_group_by_categories.append(samples_group_by_categories)
 
-        parent_categories = transfer_index_tensor_to_tuple(torch.unique(label_hierarchy, dim=0))
+        parent_categories = transfer_index_tensor_to_tuple(torch.unique(self.labels, dim=0))
         one_layer_num_subcategories = {}
         for index_tuple in parent_categories:
             one_layer_num_subcategories[index_tuple] = 1   
@@ -534,8 +537,7 @@ class HierarchicalDirichletProcess:
         '''
         Get the distribution of the Hierarchical Dirichlet Process
         '''
-        category_labels = transfer_index_tensor_to_tuple(self.labels)
-        category_distribution_on_labels = [self.hierarchical_distributions[-1][cat] for cat in category_labels]
+        category_distribution_on_labels = [self.hierarchical_distributions[-1][cat] for cat in self.labels_in_tuple]
         
         smallest_category_distribution_on_labels = torch.stack(category_distribution_on_labels)
         latent_distribution_indices = Categorical(smallest_category_distribution_on_labels).sample()
@@ -607,8 +609,7 @@ class HierarchicalDirichletProcess:
                 posteriors = p.starmap(calc_sequential_stick_breaking_weight, params)
             self.hierarchical_distributions[l+1].update(dict(zip(self.number_of_subcategories[l+1].keys(), posteriors)))
         # Base distribution over parameters
-        category_labels = transfer_index_tensor_to_tuple(self.labels)
-        category_distribution_on_labels = [self.hierarchical_distributions[-1][cat] for cat in category_labels]
+        category_distribution_on_labels = [self.hierarchical_distributions[-1][cat] for cat in self.labels_in_tuple]
         self.smallest_category_distribution_on_labels = torch.stack(category_distribution_on_labels)
 
     def posterior_update_of_labels(self):
