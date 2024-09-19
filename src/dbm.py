@@ -19,7 +19,7 @@ class DBM:
         """
         Sample visible units given hidden units
         """
-        activation = torch.mm(y, W)   
+        activation = torch.matmul(y, W)   
         p_v_given_h = torch.sigmoid(activation)
         if (self.mode == "bernoulli"):
             return p_v_given_h, torch.bernoulli(p_v_given_h)
@@ -32,7 +32,7 @@ class DBM:
         """
         Sample hidden units given visible units
         """
-        activation = torch.mm(x_bottom, W_bottom.t()) + torch.mm(x_top, W_top.t())
+        activation = torch.matmul(x_bottom, W_bottom.t()) + torch.matmul(x_top, W_top.t())
         p_h_given_v = torch.sigmoid(activation)
         if (self.mode == "bernoulli"):
             return p_h_given_v, torch.bernoulli(p_h_given_v)
@@ -102,21 +102,21 @@ class DBM:
                     if (index == self.layers-1):
                         old_mu = self.layer_mean_field_parameters[index]["mu"]
 
-                        activation = torch.mm(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"])
+                        activation = torch.matmul(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"])
                         self.layer_mean_field_parameters[index]["mu"] = torch.sigmoid(activation)
 
                         mu_diff = torch.max(torch.sum(torch.abs(old_mu - self.layer_mean_field_parameters[index]["mu"])), mu_diff)
                     elif (index == 0):
                         old_mu = self.layer_mean_field_parameters[index]["mu"]
 
-                        activation = torch.mm(dataset, self.layer_parameters[index]["W"]) + torch.mm(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"].t())
+                        activation = torch.matmul(dataset, self.layer_parameters[index]["W"]) + torch.matmul(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"].t())
                         self.layer_mean_field_parameters[index]["mu"] = torch.sigmoid(activation)
 
                         mu_diff = torch.max(torch.sum(torch.abs(old_mu - self.layer_mean_field_parameters[index]["mu"])), mu_diff)
                     else:
                         old_mu = self.layer_mean_field_parameters[index]["mu"]
 
-                        activation = torch.mm(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"]) + torch.mm(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"].t())
+                        activation = torch.matmul(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"]) + torch.matmul(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"].t())
                         self.layer_mean_field_parameters[index]["mu"] = torch.sigmoid(activation)
                         
                         mu_diff = torch.max(torch.sum(torch.abs(old_mu - self.layer_mean_field_parameters[index]["mu"])), mu_diff)
@@ -141,9 +141,9 @@ class DBM:
             alpha = 0.01
             for index, _ in enumerate(self.layers):
                 if (index == 0):
-                    self.layer_parameters[index]["W"] += alpha * (torch.mm(variables[index].t(), self.layer_mean_field_parameters[index]["mu"])/batch_size - torch.mm(new_variables[index].t(), new_variables[index+1])/batch_size)
+                    self.layer_parameters[index]["W"] += alpha * (torch.matmul(variables[index].t(), self.layer_mean_field_parameters[index]["mu"])/batch_size - torch.matmul(new_variables[index].t(), new_variables[index+1])/batch_size)
                 else:
-                    self.layer_parameters[index]["W"] += alpha * (torch.mm(self.layer_mean_field_parameters[index-1]["mu"].t(), self.layer_mean_field_parameters[index]["mu"])/batch_size - torch.mm(new_variables[index].t(), new_variables[index+1])/batch_size)
+                    self.layer_parameters[index]["W"] += alpha * (torch.matmul(self.layer_mean_field_parameters[index-1]["mu"].t(), self.layer_mean_field_parameters[index]["mu"])/batch_size - torch.matmul(new_variables[index].t(), new_variables[index+1])/batch_size)
             
             variables = new_variables
             alpha -= 0.001
