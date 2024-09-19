@@ -195,3 +195,14 @@ class DBM:
                 model[layer_no].bias = torch.nn.Parameter(self.layer_parameters[layer_no//2]["hb"])
         return model
     
+
+if __name__ == "__main__":
+    # Test DBM
+    dbm = DBM(784, [500, 500, 2000], mode="bernoulli", gpu=False, k=5)
+    dataset = torch.rand(128, 784)
+    dbm.pre_train(dataset)
+    dbm.train(dataset, 100)
+    model = dbm.initialize_model()
+    print(model)
+    reconstructed = model(dataset)
+    print(reconstructed)
