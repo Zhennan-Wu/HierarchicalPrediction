@@ -16,6 +16,9 @@ from typing import Any, Union, List, Tuple, Dict
 from jax.tree_util import PyTreeDef
 from utils import TreeNode, Tree
 
+import matplotlib.pyplot as plt
+import numpy as np
+
 PyTree = Union[jnp.ndarray, List['PyTree'], Tuple['PyTree', ...], Dict[Any, 'PyTree']]
 
 
@@ -350,7 +353,7 @@ class HierarchicalDirichletProcess:
         '''
         print(self.cumulative_weights)
     
-    def display_update_progress(self, round):
+    def display_update_progress(self, round, joint_prob):
         '''
         Display the progress of the update
         '''
@@ -358,6 +361,16 @@ class HierarchicalDirichletProcess:
         print("The number of subcategories in each layer: {}".format(self.number_of_subcategories))
         print("The number of samples in each layer: {}".format(self.hierarchical_observations))
         print("The labels grouped by categories: {}".format(self.labels_group_by_categories))
+        
+        num_iteration = [1 + round_idx for round_idx in list(range(round+1))]
+        if (round > 0 and round % 10 == 0):
+            plt.plot(num_iteration, joint_prob)
+            plt.xlabel("Number of Gibbs Sampling Iterations")
+            plt.ylabel("Joint Probability")
+            plt.title("Joint Probability of the Hierarchical Dirichlet Process")
+            plt.show()
+            plt.pause(1) 
+            plt.close()
 
     def generate_parameters(self):
         '''
@@ -628,13 +641,24 @@ class HierarchicalDirichletProcess:
         '''
         Update the Hierarchical Dirichlet Process using Gibbs Sampling
         '''
+        joint_prob = []
         concatenated_data = torch.sum(data, dim=1)
         for round in range(number_of_iterations):
             self.posterior_update_of_params(concatenated_data)
             self.posterior_update_of_distributions()
             self.posterior_update_of_labels()
-            self.display_update_progress(round)
+            joint_prob.append(self.calculate_joint_probability(concatenated_data))
+            self.display_update_progress(round, joint_prob)
         self.update_cumulated_weights()
+    
+    def calculate_joint_probability(self, concatenated_data: torch.Tensor):
+        '''
+        Calculate the joint probability of the Hierarchical Dirichlet Process
+        '''
+        
+        marginalize_out_topic = torch.matmul(self.smallest_category_distribution_on_labels, self.parameters)
+        joint_prob = concatenated_data * marginalize_out_topic
+        return torch.sum(joint_prob)
         
     def _increase_categories(self, new_categories: list, new_labels: list): 
         '''
@@ -693,13 +717,15 @@ class HierarchicalDirichletProcess:
                         else:
                             tree_level[pc][cc] = {}
                 num_categories = len(tree_level.keys()) 
-                tree_level[(num_categories,)] = {'parent': (num_categories,)}
-                self.hyperparameters["DP"][(num_categories,)] = Gamma(1, 1).sample().item()
+                if (num_categories < self.implied_constraints[l]):
+                    tree_level[(num_categories,)] = {'parent': (num_categories,)}
+                    self.hyperparameters["DP"][(num_categories,)] = Gamma(1, 1).sample().item()
                 tree_level = tree_level.values()
                 if (debug):
                     print(tree_level)
             else:
                 new_level = []
+                total_num_categories = sum([len(tree.keys()) for tree in tree_level])
                 for tree in tree_level:
                     for cc in self.number_of_subcategories[l+1].keys():
                         pc = cc[:-1]
@@ -713,16 +739,19 @@ class HierarchicalDirichletProcess:
                     if ('parent' in tree.keys()):
                         prefix = tree.pop('parent')
                         num_categories =  (0,)
+                        total_num_categories -= 1
                     else:
                         prefix = list(tree.keys())[0][:-1]
                         num_categories = (self.number_of_subcategories[l-1][prefix],)
-                    new_value = prefix + num_categories
-                    tree[new_value] = {'parent': new_value}
-                    self.hyperparameters["DP"][new_value] = Gamma(1, 1).sample().item()
+                    if (total_num_categories < self.implied_constraints[l]):
+                        new_value = prefix + num_categories
+                        tree[new_value] = {'parent': new_value}
+                        self.hyperparameters["DP"][new_value] = Gamma(1, 1).sample().item()
                     new_level += list(tree.values())
                 tree_level = new_level
                 if (debug):
                     print(tree_level)
+        total_num_categories = sum([len(tree.keys()) for tree in tree_level])
         for tree in tree_level:
             if (len(self.cumulative_weights) > 0):
                 total_leaf_keys = set(list(self.number_of_subcategories[-1].keys()) + list(self.cumulative_weights[-1].keys()))
@@ -740,12 +769,14 @@ class HierarchicalDirichletProcess:
             if ('parent' in tree.keys()):
                 prefix = tree.pop('parent')
                 num_categories = (0,)
+                total_num_categories -= 1
             else:
                 prefix = list(tree.keys())[0][:-1]
                 num_categories = (self.number_of_subcategories[-2][prefix],)
-            new_value = prefix + num_categories
-            tree[new_value] = INFO(self.hyperparameters["nCRP"].item(), new_value, self.base_weight)
-            self.hyperparameters["DP"][new_value] = Gamma(1, 1).sample().item()
+            if (total_num_categories < self.implied_constraints[self.layers - 1]):
+                new_value = prefix + num_categories
+                tree[new_value] = INFO(self.hyperparameters["nCRP"].item(), new_value, self.base_weight)
+                self.hyperparameters["DP"][new_value] = Gamma(1, 1).sample().item()
         if (debug):
             print(tree_level)
         return root
