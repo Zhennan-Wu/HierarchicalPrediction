@@ -7,7 +7,7 @@ class RBM_no_bias:
     """
     Restricted Boltzmann Machine
     """
-    def __init__(self, num_visible, num_hidden, lr=0.001, epochs=5, mode="bernoulli", batch_size=32, k=3, optimizer="adam", gpu=False, savefile=None, early_stopping_patient=5):
+    def __init__(self, num_visible, num_hidden, lr=0.001, epochs=5, mode="bernoulli", batch_size=32, k=3, optimizer="adam", savefile=None, early_stopping_patient=5):
         self.mode = mode
         self.num_visible = num_visible
         self.num_hidden = num_hidden
@@ -29,7 +29,7 @@ class RBM_no_bias:
         self.previous_loss_before_stagnation = 0
         self.progress = []
 
-        if (torch.cuda.is_available() and gpu):
+        if (torch.cuda.is_available()):
             self.device = torch.device("cuda")
         else:
             self.device = torch.device("cpu")
@@ -89,7 +89,8 @@ class RBM_no_bias:
         """
         Train RBM
         """
-        dataset = torch.tensor(dataset, dtype=torch.float32).to(self.device)
+        dataset = dataset.clone().detach()
+        # dataset = torch.tensor(dataset, dtype=torch.float32).to(self.device)
         learning = trange(self.epochs, desc=str("Starting..."))
         for epoch in learning:
             train_loss = torch.tensor([0])

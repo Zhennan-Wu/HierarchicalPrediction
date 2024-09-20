@@ -6,7 +6,7 @@ class DBM:
     """
     Deep Boltzmann Machine
     """
-    def __init__(self, input_size, layers, mode="bernoulli", gpu=False, k=5, savefile=None):
+    def __init__(self, input_size, layers, mode="bernoulli", k=5, savefile=None):
         self.input_size = input_size
         self.layers = layers
         self.layer_parameters = [{"W":None} for _ in range(len(layers))]
@@ -14,17 +14,24 @@ class DBM:
         self.k = k
         self.mode = mode
         self.savefile = savefile
-    
+
+        if (torch.cuda.is_available()):
+            self.device = torch.device("cuda")
+        else:
+            self.device = torch.device("cpu")
+
     def sample_v(self, y, W):
         """
         Sample visible units given hidden units
         """
-        activation = torch.matmul(y, W)   
+        activation = torch.matmul(y.to(self.device), W.to(self.device))   
         p_v_given_h = torch.sigmoid(activation)
         if (self.mode == "bernoulli"):
-            return p_v_given_h, torch.bernoulli(p_v_given_h)
+            # return p_v_given_h, torch.bernoulli(p_v_given_h)
+            return torch.bernoulli(p_v_given_h)
         elif (self.mode == "gaussian"):
-            return p_v_given_h, torch.add(p_v_given_h, torch.normal(mean=0, std=1, size=p_v_given_h.shape, device=self.device))
+            # return p_v_given_h, torch.add(p_v_given_h, torch.normal(mean=0, std=1, size=p_v_given_h.shape, device=self.device))
+            return torch.add(p_v_given_h, torch.normal(mean=0, std=1, size=p_v_given_h.shape, device=self.device))
         else:
             raise ValueError("Invalid mode")
     
@@ -32,12 +39,14 @@ class DBM:
         """
         Sample hidden units given visible units
         """
-        activation = torch.matmul(x_bottom, W_bottom.t()) + torch.matmul(x_top, W_top.t())
+        activation = torch.matmul(x_bottom.to(self.device), W_bottom.t().to(self.device)) + torch.matmul(x_top.to(self.device), W_top.to(self.device))
         p_h_given_v = torch.sigmoid(activation)
         if (self.mode == "bernoulli"):
-            return p_h_given_v, torch.bernoulli(p_h_given_v)
+            # return p_h_given_v, torch.bernoulli(p_h_given_v)
+            return torch.bernoulli(p_h_given_v)
         elif (self.mode == "gaussian"):
-            return p_h_given_v, torch.add(p_h_given_v, torch.normal(mean=0, std=1, size=p_h_given_v.shape, device=self.device))
+            # return p_h_given_v, torch.add(p_h_given_v, torch.normal(mean=0, std=1, size=p_h_given_v.shape, device=self.device))
+            return torch.add(p_h_given_v, torch.normal(mean=0, std=1, size=p_h_given_v.shape, device=self.device))
         else:
             raise ValueError("Invalid mode")
     
@@ -52,7 +61,7 @@ class DBM:
             for _ in range(self.k):
                 x_dash = x.clone()
                 for i in range(index):
-                    _, x_dash = self.sample_h(x_dash, self.layer_parameters[i]["W"])
+                    x_dash = self.sample_h(x_dash, self.layer_parameters[i]["W"])
                 x_gen.append(x_dash)
             x_dash = torch.stack(x_gen)
             x_dash = torch.mean(x_dash, dim=0)
@@ -69,7 +78,9 @@ class DBM:
                 vn = self.layers[index-1]
             hn = self.layers[index]
 
-            rbm = RBM_no_bias(vn, hn, epochs=100, mode="bernoulli", lr=0.0005, k=10, batch_size=128, gpu=True, optimizer="adam", early_stopping_patient=10)
+            rbm = RBM_no_bias(vn, hn, epochs=100, mode="bernoulli", lr=0.0005, k=10, batch_size=128, optimizer="adam", early_stopping_patient=10)
+            if (rbm.device != self.device):
+                self.device = rbm.device
             x_dash = self.generate_input_for_layer(index, dataset)
             rbm.train(x_dash)
             self.layer_parameters[index]["W"] = rbm.weights
@@ -82,12 +93,15 @@ class DBM:
         Train DBM
         """
         # Initialize mean field parameters
-        batch_size, data_dimension = dataset.size()
+        batch_size = int(dataset.size()[0])
         for index, _ in enumerate(self.layers):
-            unnormalized_mf_param = torch.rand(data_dimension)
+            print(index)
+            print("mean field dimension", self.layer_parameters[index]["W"].shape[0])
+            print("W shape", self.layer_parameters[index]["W"].shape)
+            unnormalized_mf_param = torch.rand(self.layer_parameters[index]["W"].shape[0])
             self.layer_mean_field_parameters[index]["mu"] = unnormalized_mf_param/torch.sum(unnormalized_mf_param)
         variables = []
-        for index, _ in enumerate(self.layers):
+        for index in range(len(self.layers)+1):
             if (index == 0):
                 variables.append(dataset)
             else:
@@ -99,27 +113,26 @@ class DBM:
             mu_diff = torch.tensor(-1)
             while (mf_step < mf_maximum_steps):
                 for index, _ in enumerate(self.layers):
-                    if (index == self.layers-1):
+                    if (index == len(self.layers)-1):
                         old_mu = self.layer_mean_field_parameters[index]["mu"]
 
-                        activation = torch.matmul(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"])
+                        activation = torch.matmul(self.layer_mean_field_parameters[index-1]["mu"].to(self.device), self.layer_parameters[index]["W"].t().to(self.device))
                         self.layer_mean_field_parameters[index]["mu"] = torch.sigmoid(activation)
 
-                        mu_diff = torch.max(torch.sum(torch.abs(old_mu - self.layer_mean_field_parameters[index]["mu"])), mu_diff)
+                        mu_diff = torch.max(torch.sum(torch.abs(old_mu.to(self.device) - self.layer_mean_field_parameters[index]["mu"].to(self.device))), mu_diff)
                     elif (index == 0):
                         old_mu = self.layer_mean_field_parameters[index]["mu"]
-
-                        activation = torch.matmul(dataset, self.layer_parameters[index]["W"]) + torch.matmul(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"].t())
+                        activation = torch.matmul(dataset.to(self.device), self.layer_parameters[index]["W"].t().to(self.device)) + torch.matmul(self.layer_mean_field_parameters[index+1]["mu"].to(self.device), self.layer_parameters[index+1]["W"].to(self.device))
                         self.layer_mean_field_parameters[index]["mu"] = torch.sigmoid(activation)
 
-                        mu_diff = torch.max(torch.sum(torch.abs(old_mu - self.layer_mean_field_parameters[index]["mu"])), mu_diff)
+                        mu_diff = torch.max(torch.sum(torch.abs(old_mu.to(self.device) - self.layer_mean_field_parameters[index]["mu"].to(self.device))), mu_diff)
                     else:
                         old_mu = self.layer_mean_field_parameters[index]["mu"]
 
-                        activation = torch.matmul(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"]) + torch.matmul(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"].t())
+                        activation = torch.matmul(self.layer_mean_field_parameters[index-1]["mu"].to(self.device), self.layer_parameters[index]["W"].t().to(self.device)) + torch.matmul(self.layer_mean_field_parameters[index+1]["mu"].to(self.device), self.layer_parameters[index+1]["W"].to(self.device))
                         self.layer_mean_field_parameters[index]["mu"] = torch.sigmoid(activation)
                         
-                        mu_diff = torch.max(torch.sum(torch.abs(old_mu - self.layer_mean_field_parameters[index]["mu"])), mu_diff)
+                        mu_diff = torch.max(torch.sum(torch.abs(old_mu.to(self.device) - self.layer_mean_field_parameters[index]["mu"].to(self.device))), mu_diff)
                 mf_step += 1
                 if (mu_diff < 0.001):
                     print("Mean Field Converged")
@@ -129,21 +142,22 @@ class DBM:
             
             # Update samples (subsample a subset of Markov Chains is excluded, it might need be added later for better performance)
             new_variables = []
-            for index, _ in enumerate(self.layers):
+            for index in range(len(self.layers)+1):
                 if (index == 0):
                     new_variables.append(self.sample_v(variables[index+1], self.layer_parameters[index]["W"]))
-                elif (index == self.layers-1):
-                    new_variables.append(self.sample_h(variables[index-1], self.layer_parameters[index]["W"]))
+                elif (index == len(self.layers)):
+                    new_variables.append(self.sample_h(variables[index-1], self.layer_parameters[index-1]["W"]))
                 else:  
-                    new_variables.append(self.sample_h(variables[index-1], self.layer_parameters[index]["W"], variables[index+1], self.layer_parameters[index+1]["W"]))
+                    new_variables.append(self.sample_h(variables[index-1], self.layer_parameters[index-1]["W"], variables[index+1], self.layer_parameters[index]["W"]))
             
             # Update model parameters
             alpha = 0.01
             for index, _ in enumerate(self.layers):
+                print(index)
                 if (index == 0):
-                    self.layer_parameters[index]["W"] += alpha * (torch.matmul(variables[index].t(), self.layer_mean_field_parameters[index]["mu"])/batch_size - torch.matmul(new_variables[index].t(), new_variables[index+1])/batch_size)
+                    self.layer_parameters[index]["W"] += alpha * (torch.matmul(self.layer_mean_field_parameters[index]["mu"].t().to(self.device), variables[index].to(self.device))/batch_size - torch.matmul(new_variables[index+1].t().to(self.device), new_variables[index].to(self.device))/batch_size)
                 else:
-                    self.layer_parameters[index]["W"] += alpha * (torch.matmul(self.layer_mean_field_parameters[index-1]["mu"].t(), self.layer_mean_field_parameters[index]["mu"])/batch_size - torch.matmul(new_variables[index].t(), new_variables[index+1])/batch_size)
+                    self.layer_parameters[index]["W"] += alpha * (torch.matmul(self.layer_mean_field_parameters[index]["mu"].t().to(self.device), self.layer_mean_field_parameters[index-1]["mu"].to(self.device))/batch_size - torch.matmul(new_variables[index+1].t().to(self.device), new_variables[index].to(self.device))/batch_size)
             
             variables = new_variables
             alpha -= 0.001
@@ -156,7 +170,7 @@ class DBM:
         for _ in range(self.k):
             x_dash = x.clone()
             for i in range(len(self.layer_parameters)):
-                _, x_dash = self.sample_h(x_dash, self.layer_parameters[i]["W"], self.layer_parameters[i]["hb"])
+                x_dash = self.sample_h(x_dash, self.layer_parameters[i]["W"])
             x_gen.append(x_dash)
         x_dash = torch.stack(x_gen)
         x_dash = torch.mean(x_dash, dim=0)
@@ -167,7 +181,7 @@ class DBM:
         for _ in range(self.k):
             y_dash = y.clone()
             for i in range(len(self.layer_parameters)-1, -1, -1):
-                _, y_dash = self.sample_v(y_dash, self.layer_parameters[i]["W"], self.layer_parameters[i]["vb"])
+                y_dash = self.sample_v(y_dash, self.layer_parameters[i]["W"])
             y_gen.append(y_dash)
         y_dash = torch.stack(y_gen)
         y_dash = torch.mean(y_dash, dim=0)
@@ -191,18 +205,18 @@ class DBM:
             if (layer_no//2 == len(self.layer_parameters)-1):
                 break
             if (layer_no%2 == 0):
-                model[layer_no].weight = torch.nn.Parameter(self.layer_parameters[layer_no//2]["W"])
-                model[layer_no].bias = torch.nn.Parameter(self.layer_parameters[layer_no//2]["hb"])
+                model[layer_no].weight = torch.nn.Parameter(self.layer_parameters[layer_no//2]["W"].to(self.device))
         return model
     
 
 if __name__ == "__main__":
     # Test DBM
-    dbm = DBM(784, [500, 500, 2000], mode="bernoulli", gpu=False, k=5)
+    dbm = DBM(784, [500, 500, 2000], mode="bernoulli", k=5)
     dataset = torch.rand(128, 784)
     dbm.pre_train(dataset)
     dbm.train(dataset, 100)
     model = dbm.initialize_model()
     print(model)
-    reconstructed = model(dataset)
+    model = model.to(dbm.device)
+    reconstructed = model(dataset.to(dbm.device))
     print(reconstructed)
