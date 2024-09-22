@@ -1,4 +1,5 @@
 import torch
+from typing import Any, Union, List, Tuple, Dict
 from rbm_no_bias import RBM_no_bias
 
 
@@ -65,7 +66,7 @@ class DBM:
                 x_gen.append(x_dash)
             x_dash = torch.stack(x_gen)
             x_dash = torch.mean(x_dash, dim=0)
-            return x_dash
+            return x_dash.to(self.device)
     
     def pre_train(self, dataset):
         """
@@ -88,16 +89,13 @@ class DBM:
         if (self.savefile is not None):
             torch.save(self.layer_parameters, self.savefile)
     
-    def train(self, dataset, iterations, mf_maximum_steps=10):
+    def train(self, dataset, iterations=100, mf_maximum_steps=10):
         """
         Train DBM
         """
         # Initialize mean field parameters
         batch_size = int(dataset.size()[0])
         for index, _ in enumerate(self.layers):
-            print(index)
-            print("mean field dimension", self.layer_parameters[index]["W"].shape[0])
-            print("W shape", self.layer_parameters[index]["W"].shape)
             unnormalized_mf_param = torch.rand(self.layer_parameters[index]["W"].shape[0])
             self.layer_mean_field_parameters[index]["mu"] = unnormalized_mf_param/torch.sum(unnormalized_mf_param)
         variables = []
@@ -153,7 +151,6 @@ class DBM:
             # Update model parameters
             alpha = 0.01
             for index, _ in enumerate(self.layers):
-                print(index)
                 if (index == 0):
                     self.layer_parameters[index]["W"] += alpha * (torch.matmul(self.layer_mean_field_parameters[index]["mu"].t().to(self.device), variables[index].to(self.device))/batch_size - torch.matmul(new_variables[index+1].t().to(self.device), new_variables[index].to(self.device))/batch_size)
                 else:
@@ -208,7 +205,38 @@ class DBM:
                 model[layer_no].weight = torch.nn.Parameter(self.layer_parameters[layer_no//2]["W"].to(self.device))
         return model
     
+    def generate_top_level_latent_variables(self, dataset, repeat):
+        """
+        Generate top level latent variables
+        """
+        # version 1
+        x_gen = []
+        for _ in range(self.k):
+            x_dash = dataset.clone()
+            for i in range(len(self.layers)-1):
+                x_dash = self.sample_h(x_dash, self.layer_parameters[i]["W"])
+            x_gen.append(x_dash)
+        x_gen = torch.stack(x_gen)
+        x_dash = torch.mean(x_gen, dim=0)
+        
+        x_gen = []
+        for _ in range(repeat):
+            x_gen.append(self.sample_h(x_dash, self.layer_parameters[-1]["W"]))
+        x_dash = torch.stack(x_gen, dim=1)
+        return x_dash
 
+    def generate_visible_variables(self, top_level_latent_variables_distributions, repeat):
+        """
+        Reconstruct observation
+        """
+        y_gen = []
+        for _ in range(repeat):
+            y_gen.append(torch.bernoulli(top_level_latent_variables_distributions))
+        y_dash = torch.sum(torch.stack(y_gen, dim=1), dim=1)
+        for i in range(len(self.layers)-1, -1, -1):
+            y_dash = self.sample_v(y_dash, self.layer_parameters[i]["W"])
+        return y_dash
+    
 if __name__ == "__main__":
     # Test DBM
     dbm = DBM(784, [500, 500, 2000], mode="bernoulli", k=5)

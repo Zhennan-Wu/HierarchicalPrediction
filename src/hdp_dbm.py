@@ -1,42 +1,33 @@
 import torch
-from hp import HP
+from hp import HierarchicalDirichletProcess
 from dbm import DBM
 
+if __name__ == "__main__":
 
-class HDP_DBM:
-    """
-    Hierarchical Dirichlet Prior Deep Boltzmann Machine
-    """
-    def __init__(self, pretrained_dbm):
-        self.dbm = pretrained_dbm
-        self.hp = HP()
+    datasize = 1000
+    data_dimension = 784
+    latent_dimension = 10
+    dbm_stable_param = 5
+    latent_sample_size = 10
 
-
-    def train_HDP(self, top_level_latent_variables):
-        """
-        Train HDP
-        """
-        self.hp.hierarchical_dp()
+    # Test DBM
+    dataset = torch.rand(datasize, data_dimension)
+    comparison = torch.rand(datasize, data_dimension)
     
-    def fine_tune_DBM(self, dataset):
-        """
-        Fine tune DBM
-        """
-        self.dbm.train(dataset)
-                                         
-    def train(self, dataset):
-        """
-        Train HDP-DBM
-        """
-        y = self.hp.hierarchical_dp()
+    dbm = DBM(data_dimension, [500, 500, latent_dimension], mode="bernoulli", k=dbm_stable_param)
+    dbm.pre_train(dataset)
+    dbm.train(dataset)
+    latent_variables = dbm.generate_top_level_latent_variables(dataset.to(torch.device("cuda")), latent_sample_size)
 
-        y_gen = []
-        for _ in range(self.dbm.k):
-            y_dash = y.clone()
-            for i in range(len(self.dbm.layer_parameters)-1, -1, -1):
-                _, y_dash = self.dbm.sample_v(y_dash, self.dbm.layer_parameters[i]["W"])
-            y_gen.append(y_dash)
-        y_dash = torch.stack(y_gen)
-        y_dash = torch.mean(y_dash, dim=0)
+    print(latent_variables.shape)
+    hp = HierarchicalDirichletProcess(latent_dimension, 3, datasize, 10, {2: 10})    
+    hp.gibbs_update(20, latent_variables.to(torch.device("cpu")))
+    latent_distribution = hp.get_latent_distributions()
+
+    reconstructed_data = dbm.generate_visible_variables(latent_distribution.to(torch.device("cuda")), latent_sample_size)
+
+    print("Reconstruction Difference: ", torch.sum(torch.abs(reconstructed_data.to(torch.device("cpu")) - dataset)))
+
+    print("Comparison Difference: ", torch.sum(torch.abs(comparison - dataset)))
     
 

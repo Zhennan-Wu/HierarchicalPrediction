@@ -1,3 +1,0 @@
-import unittest
-from hp_redesign import HierarchicalDirichletProcess
-

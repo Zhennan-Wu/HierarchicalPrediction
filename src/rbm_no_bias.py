@@ -89,11 +89,11 @@ class RBM_no_bias:
         """
         Train RBM
         """
-        dataset = dataset.clone().detach()
+        dataset = dataset.clone().detach().to(self.device)
         # dataset = torch.tensor(dataset, dtype=torch.float32).to(self.device)
         learning = trange(self.epochs, desc=str("Starting..."))
         for epoch in learning:
-            train_loss = torch.tensor([0])
+            train_loss = torch.tensor([0.]).to(self.device)
             counter = 1
             for batch_start_index in range(0, dataset.shape[0]-self.batch_size, self.batch_size):
                 vk = dataset[batch_start_index:batch_start_index+self.batch_size]
