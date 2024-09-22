@@ -1,13 +1,14 @@
 import numpy as np
 import torch
 from tqdm import trange
+from typing import Any, Union, List, Tuple, Dict
 
 
 class RBM_no_bias:
     """
     Restricted Boltzmann Machine
     """
-    def __init__(self, num_visible, num_hidden, lr=0.001, epochs=5, mode="bernoulli", batch_size=32, k=3, optimizer="adam", savefile=None, early_stopping_patient=5):
+    def __init__(self, num_visible, num_hidden: int, lr: float = 0.001, epochs: int = 5, mode: str = "bernoulli", batch_size: int = 32, k: int = 3, optimizer: str = "adam", savefile: str = None, early_stopping_patient: int = 5):
         self.mode = mode
         self.num_visible = num_visible
         self.num_hidden = num_hidden
@@ -38,7 +39,7 @@ class RBM_no_bias:
         std = 4*np.sqrt(6./(self.num_visible + self.num_hidden))  
         self.weights = torch.normal(mean=0, std=std, size=(self.num_hidden, self.num_visible), device=self.device)
 
-    def sample_h(self, x):
+    def sample_h(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Sample hidden units given visible units
         """
@@ -51,7 +52,7 @@ class RBM_no_bias:
         else:
             raise ValueError("Invalid mode")
     
-    def sample_v(self, y):
+    def sample_v(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Sample visible units given hidden units
         """
@@ -64,7 +65,7 @@ class RBM_no_bias:
         else:
             raise ValueError("Invalid mode")
     
-    def adam(self, g, epoch, index):
+    def adam(self, g: torch.Tensor , epoch: int, index: int) -> torch.Tensor:
         """
         Adam optimizer
         """
@@ -74,7 +75,7 @@ class RBM_no_bias:
         v_hat = self.v[index]/(1-np.power(self.beta_2, epoch))
         return m_hat/(torch.sqrt(v_hat) + self.epsilon)
     
-    def update(self, v0, vk, ph0, phk, epoch):
+    def update(self, v0: torch.Tensor, vk: torch.Tensor, ph0: torch.Tensor, phk: torch.Tensor, epoch: int):
         """
         Update weights and biases
         """
@@ -85,7 +86,7 @@ class RBM_no_bias:
 
         self.weights += self.lr*dW
 
-    def train(self, dataset):
+    def train(self, dataset: torch.Tensor):
         """
         Train RBM
         """
@@ -128,7 +129,7 @@ class RBM_no_bias:
             model = {"W": self.weights, "vb": self.visible_bias, "hb": self.hidden_bias}
             torch.save(model, self.savefile)
 
-    def load_rbm(self, savefile):
+    def load_rbm(self, savefile: str):
         """
         Load RBM
         """
