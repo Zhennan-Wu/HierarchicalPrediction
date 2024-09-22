@@ -209,32 +209,44 @@ class DBM:
         """
         Generate top level latent variables
         """
-        # version 1
-        x_gen = []
-        for _ in range(self.k):
-            x_dash = dataset.clone()
-            for i in range(len(self.layers)-1):
-                x_dash = self.sample_h(x_dash, self.layer_parameters[i]["W"])
-            x_gen.append(x_dash)
-        x_gen = torch.stack(x_gen)
-        x_dash = torch.mean(x_gen, dim=0)
+        # # version 1
+        # x_gen = []
+        # for _ in range(self.k):
+        #     x_dash = dataset.clone()
+        #     for i in range(len(self.layers)-1):
+        #         x_dash = self.sample_h(x_dash, self.layer_parameters[i]["W"])
+        #     x_gen.append(x_dash)
+        # x_gen = torch.stack(x_gen)
+        # x_dash = torch.mean(x_gen, dim=0)
         
+        # x_gen = []
+        # for _ in range(repeat):
+        #     x_gen.append(self.sample_h(x_dash, self.layer_parameters[-1]["W"]))
+        # x_dash = torch.stack(x_gen, dim=1)
+
+        # version 2
         x_gen = []
         for _ in range(repeat):
-            x_gen.append(self.sample_h(x_dash, self.layer_parameters[-1]["W"]))
+            x_dash = dataset.clone()
+            for i in range(len(self.layers)):
+                x_dash = self.sample_h(x_dash, self.layer_parameters[i]["W"])
+            x_gen.append(x_dash)
         x_dash = torch.stack(x_gen, dim=1)
+
         return x_dash
 
     def generate_visible_variables(self, top_level_latent_variables_distributions, repeat):
         """
         Reconstruct observation
         """
+        # version 1
         y_gen = []
         for _ in range(repeat):
             y_gen.append(torch.bernoulli(top_level_latent_variables_distributions))
         y_dash = torch.sum(torch.stack(y_gen, dim=1), dim=1)
         for i in range(len(self.layers)-1, -1, -1):
             y_dash = self.sample_v(y_dash, self.layer_parameters[i]["W"])
+
         return y_dash
     
 if __name__ == "__main__":

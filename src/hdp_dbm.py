@@ -1,5 +1,5 @@
 import torch
-from hp import HierarchicalDirichletProcess
+from hdp import HierarchicalDirichletProcess
 from dbm import DBM
 
 if __name__ == "__main__":
