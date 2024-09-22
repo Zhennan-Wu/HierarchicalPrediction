@@ -19,15 +19,14 @@ if __name__ == "__main__":
     dbm.train(dataset)
     latent_variables = dbm.generate_top_level_latent_variables(dataset.to(torch.device("cuda")), latent_sample_size)
 
-    print(latent_variables.shape)
     hp = HierarchicalDirichletProcess(latent_dimension, 3, datasize, 10, {2: 10})    
     hp.gibbs_update(20, latent_variables.to(torch.device("cpu")))
     latent_distribution = hp.get_latent_distributions()
 
     reconstructed_data = dbm.generate_visible_variables(latent_distribution.to(torch.device("cuda")), latent_sample_size)
 
-    print("Reconstruction Difference: ", torch.sum(torch.abs(reconstructed_data.to(torch.device("cpu")) - dataset)))
+    print("Reconstruction Difference: ", torch.mean(torch.abs(reconstructed_data.to(torch.device("cpu")) - dataset)))
 
-    print("Comparison Difference: ", torch.sum(torch.abs(comparison - dataset)))
+    print("Comparison Difference: ", torch.mean(torch.abs(comparison - dataset)))
     
 
