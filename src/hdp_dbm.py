@@ -2,8 +2,14 @@ import torch
 from hdp import HierarchicalDirichletProcess
 from dbm import DBM
 
-if __name__ == "__main__":
 
+import torch.multiprocessing as mp
+
+
+
+if __name__ == "__main__":
+    
+    # mp.set_start_method('spawn')
     datasize = 1000
     data_dimension = 784
     latent_dimension = 10
@@ -17,13 +23,13 @@ if __name__ == "__main__":
     dbm = DBM(data_dimension, [500, 500, latent_dimension], mode="bernoulli", k=dbm_stable_param)
     dbm.pre_train(dataset)
     dbm.train(dataset)
-    latent_variables = dbm.generate_top_level_latent_variables(dataset.to(torch.device("cuda")), latent_sample_size)
+    latent_variables = dbm.generate_top_level_latent_variables(dataset, latent_sample_size)
 
     hp = HierarchicalDirichletProcess(latent_dimension, 3, datasize, 10, {2: 10})    
-    hp.gibbs_update(20, latent_variables.to(torch.device("cpu")))
+    hp.gibbs_update(20, latent_variables)
     latent_distribution = hp.get_latent_distributions()
 
-    reconstructed_data = dbm.generate_visible_variables(latent_distribution.to(torch.device("cuda")), latent_sample_size)
+    reconstructed_data = dbm.generate_visible_variables(latent_distribution, latent_sample_size)
 
     print("Reconstruction Difference: ", torch.mean(torch.abs(reconstructed_data.to(torch.device("cpu")) - dataset)))
 

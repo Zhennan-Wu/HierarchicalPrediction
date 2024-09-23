@@ -118,11 +118,11 @@ def calc_sequential_stick_breaking_weight(alpha: float, parent_weights: list, nu
         concentrate1 -= concentrate0
         concentrate0 = max(concentrate0, 1e-3)
         concentrate1 = max(concentrate1, 1e-3)
-        v_prime = torch.distributions.Beta(concentrate0, concentrate1).sample()
+        v_prime = torch.distributions.Beta(concentrate0, concentrate1).sample().item()
         v_values.append(v_prime)
         pi_final = v_prime
         for j in range(k):
-            pi_final *= 1 - v_values[j]
+            pi_final *= 1. - v_values[j]
         child_weights.append(pi_final)
     return torch.tensor(child_weights)
 
