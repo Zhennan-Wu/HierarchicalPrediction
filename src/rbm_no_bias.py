@@ -8,7 +8,7 @@ class RBM_no_bias:
     """
     Restricted Boltzmann Machine
     """
-    def __init__(self, num_visible, num_hidden: int, lr: float = 0.001, epochs: int = 5, mode: str = "bernoulli", batch_size: int = 32, k: int = 3, optimizer: str = "adam", savefile: str = None, early_stopping_patient: int = 5):
+    def __init__(self, num_visible, num_hidden: int, init_weight: torch.Tensor = None, lr: float = 0.001, epochs: int = 5, mode: str = "bernoulli", batch_size: int = 32, k: int = 3, optimizer: str = "adam", savefile: str = None, early_stopping_patient: int = 5):
         self.mode = mode
         self.num_visible = num_visible
         self.num_hidden = num_hidden
@@ -36,8 +36,11 @@ class RBM_no_bias:
             self.device = torch.device("cpu")
 
         # Initialize weights
-        std = 4*np.sqrt(6./(self.num_visible + self.num_hidden))  
-        self.weights = torch.normal(mean=0, std=std, size=(self.num_hidden, self.num_visible), device=self.device)
+        if (init_weight == None):
+            std = 4*np.sqrt(6./(self.num_visible + self.num_hidden))  
+            self.weights = torch.normal(mean=0, std=std, size=(self.num_hidden, self.num_visible), device=self.device)
+        else:
+            self.weights = init_weight.to(self.device)
 
     def sample_h(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """

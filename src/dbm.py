@@ -80,7 +80,7 @@ class DBM:
                 vn = self.layers[index-1]
             hn = self.layers[index]
 
-            rbm = RBM_no_bias(vn, hn, epochs=100, mode="bernoulli", lr=0.0005, k=10, batch_size=128, optimizer="adam", early_stopping_patient=10)
+            rbm = RBM_no_bias(vn, hn, init_weight=self.layer_parameters[index]["W"], epochs=100, mode="bernoulli", lr=0.0005, k=10, batch_size=128, optimizer="adam", early_stopping_patient=10)
             if (rbm.device != self.device):
                 self.device = rbm.device
             x_dash = self.generate_input_for_layer(index, dataset)

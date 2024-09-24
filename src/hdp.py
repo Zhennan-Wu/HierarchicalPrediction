@@ -8,11 +8,12 @@ from torch.multiprocessing import Pool
 from typing import Any, Union, List, Tuple, Dict
 
 import matplotlib.pyplot as plt
+plt.switch_backend('TkAgg')
 import time
 import math
 import random
 
-from utils import transfer_index_tensor_to_tuple, transfer_index_tuple_to_tensor, calc_sequential_stick_breaking_weight, INFO, DirichletProcess
+from utils import transfer_index_tensor_to_tuple, transfer_index_tuple_to_tensor, calc_sequential_stick_breaking_weight, print_tree, INFO, DirichletProcess
 
 
 PyTree = Union[jnp.ndarray, List['PyTree'], Tuple['PyTree', ...], Dict[Any, 'PyTree']]
@@ -215,22 +216,23 @@ class HierarchicalDirichletProcess:
         '''
         return self.cumulative_weights
     
-    def display_update_progress(self, round, joint_prob):
+    def display_update_progress(self, batch_index, round, joint_prob):
         '''
         Display the progress of the update
         '''
         print("Update Round {}".format(round))
-        print("The number of subcategories in each layer: {}".format(self.number_of_subcategories))
-        print("The number of samples in each layer: {}".format(self.hierarchical_observations))
-        print("The labels grouped by categories: {}".format(self.labels_group_by_categories))
+        # print("The number of subcategories in each layer: {}".format(self.number_of_subcategories))
+        # print("The number of samples in each layer: {}".format(self.hierarchical_observations))
+        # print("The labels grouped by categories: {}".format(self.labels_group_by_categories))
         
         num_iteration = [1 + round_idx for round_idx in list(range(round+1))]
+        dir = '../results/'
         if (round > 0 and round % 10 == 0):
             plt.plot(num_iteration, joint_prob)
             plt.xlabel("Number of Gibbs Sampling Iterations")
             plt.ylabel("Joint Probability")
             plt.title("Joint Probability of the Hierarchical Dirichlet Process")
-            plt.show()
+            plt.savefig(dir+'batch-{}_round-{}_joint_prob.png'.format(batch_index, round))
 
     def generate_parameters(self):
         '''
@@ -270,7 +272,8 @@ class HierarchicalDirichletProcess:
         '''
         eta = self.hyperparameters["nCRP"]
         label_hierarchy = []
-        parent_labels = self._generate_CRP(self.batch_size, eta)
+        seed = random.randint(0, 100)
+        parent_labels = self._generate_CRP(self.batch_size, eta, seed)
         indices_group_by_categories = torch.arange(self.batch_size, device = self.device)
         parent_categories = torch.zeros(1, device = self.device)
         parent_counts = torch.tensor([self.batch_size], device = self.device)
@@ -298,8 +301,10 @@ class HierarchicalDirichletProcess:
                 num_subcategories = self.fixed_layers[l]
                 labels =self._generate_fixed_categories(counts, eta, num_subcategories)               
             else:
+                seeds = random_integers = [random.randint(0, 1000000) for _ in range(num_categories)]
+                hyper_params = [eta]*num_categories
                 with Pool(num_categories) as p:
-                    params =list(itertools.product(counts.tolist(), [eta]))
+                    params = [list(item) for item in zip(counts.tolist(), hyper_params, seeds)]
                     labels = p.starmap(self._generate_CRP, params)
             if (isinstance(indices, list)):
                 global_indices = torch.cat(indices, dim=0)
@@ -495,7 +500,7 @@ class HierarchicalDirichletProcess:
 
         self.labels = torch.tensor([[int(index) for index in label] for label in new_labels], device = self.device)
 
-    def gibbs_update(self, number_of_iterations: int, data: torch.Tensor):
+    def gibbs_update(self, batch_index: int, number_of_iterations: int, data: torch.Tensor):
         '''
         Update the Hierarchical Dirichlet Process using Gibbs Sampling
         '''
@@ -507,7 +512,7 @@ class HierarchicalDirichletProcess:
             self.posterior_update_of_distributions()
             self.posterior_update_of_labels()
             joint_prob.append(self.calculate_joint_probability(concatenated_data))
-            self.display_update_progress(round, joint_prob)
+            self.display_update_progress(batch_index, round, joint_prob)
         self.update_cumulated_weights()
     
     def calculate_joint_probability(self, concatenated_data: torch.Tensor):
@@ -518,7 +523,50 @@ class HierarchicalDirichletProcess:
         marginalize_out_topic = torch.matmul(self.smallest_category_distribution_on_labels, self.parameters)
         joint_prob = concatenated_data * marginalize_out_topic
         return torch.sum(joint_prob)
-        
+
+    def summarize_hierarchical_results(self, ground_truth: torch.Tensor) -> dict:
+        '''
+        Generate the results of the Hierarchical Dirichlet Process
+        '''
+        root = {}
+        tree_level = root
+
+        for l in range(self.layers-1):
+            if (l == 0):
+                for cc in self.number_of_subcategories[l+1].keys():
+                    pc = cc[:-1]
+                    if (pc not in tree_level.keys()):
+                        tree_level[pc] = {cc: {}}
+                    else:
+                        tree_level[pc][cc] = {}
+                tree_level = tree_level.values()
+            else:
+                new_level = []
+                for tree in tree_level:
+                    for cc in self.number_of_subcategories[l+1].keys():
+                        pc = cc[:-1]
+                        if (pc in tree.keys()):
+                            tree[pc][cc] = {}
+                    new_level += list(tree.values())
+                tree_level = new_level
+
+        for tree in tree_level:
+            total_leaf_keys = list(self.number_of_subcategories[-1].keys())
+            for cc in total_leaf_keys:
+                if (cc in tree.keys()):
+                    if (ground_truth is not None):
+                        tree[cc] = {"labels": self.labels_group_by_categories[-1][cc], "weights": self.hierarchical_distributions[-1][cc], "true_labels": ground_truth[self.labels_group_by_categories[-1][cc]]}
+                    else:
+                        tree[cc] = {"labels": self.labels_group_by_categories[-1][cc], "weights": self.hierarchical_distributions[-1][cc]}
+        return root
+    
+    def display_hierarchical_results(self, ground_truth: torch.Tensor = None):
+        '''
+        Display the hierarchical results of the Hierarchical Dirichlet Process
+        '''
+        label_hierarchy = self.summarize_hierarchical_results(ground_truth)
+        print_tree(label_hierarchy)
+
     def _increase_categories(self, new_categories: list, new_labels: list): 
         '''
         Increase the categories of the Hierarchical Dirichlet Process
@@ -553,87 +601,6 @@ class HierarchicalDirichletProcess:
             samples_group_by_categories = dict(zip(parent_keys, categorized_samples))
             self.labels_group_by_categories[l].update(samples_group_by_categories)
 
-    def generate_hierarchical_results(self):
-        '''
-        Generate the results of the Hierarchical Dirichlet Process
-        '''
-        root = {}
-        tree_level = root
-
-        for l in range(self.layers-1):
-            if (l == 0):
-                for cc in self.number_of_subcategories[l+1].keys():
-                    pc = cc[:-1]
-                    if (pc not in tree_level.keys()):
-                        tree_level[pc] = {cc: {}}
-                    else:
-                        tree_level[pc][cc] = {}
-                if (len(self.cumulative_weights) > 0):
-                    for cc in self.cumulative_weights[l+1].keys():
-                        pc = cc[:-1]
-                        if (pc not in tree_level.keys()):
-                            tree_level[pc] = {cc: {}}
-                        else:
-                            tree_level[pc][cc] = {}
-                num_categories = len(tree_level.keys()) 
-                if (num_categories < self.implied_constraints[l]):
-                    tree_level[(num_categories,)] = {'parent': (num_categories,)}
-                    self.hyperparameters["DP"][(num_categories,)] = Gamma(self.gamma_alpha, self.gamma_beta).sample().item()
-                tree_level = tree_level.values()
-            else:
-                new_level = []
-                total_num_categories = sum([len(tree.keys()) for tree in tree_level])
-                for tree in tree_level:
-                    for cc in self.number_of_subcategories[l+1].keys():
-                        pc = cc[:-1]
-                        if (pc in tree.keys()):
-                            tree[pc][cc] = {}
-                    if (len(self.cumulative_weights) > 0):
-                        for cc in self.cumulative_weights[l+1].keys():
-                            pc = cc[:-1]
-                            if (pc in tree.keys()):
-                                tree[pc][cc] = {}
-                    if ('parent' in tree.keys()):
-                        prefix = tree.pop('parent')
-                        num_categories =  (0,)
-                        total_num_categories -= 1
-                    else:
-                        prefix = list(tree.keys())[0][:-1]
-                        num_categories = (self.number_of_subcategories[l-1][prefix],)
-                    if (total_num_categories < self.implied_constraints[l]):
-                        new_value = prefix + num_categories
-                        tree[new_value] = {'parent': new_value}
-                        self.hyperparameters["DP"][new_value] = Gamma(self.gamma_alpha, self.gamma_beta).sample().item()
-                    new_level += list(tree.values())
-                tree_level = new_level
-        total_num_categories = sum([len(tree.keys()) for tree in tree_level])
-        for tree in tree_level:
-            if (len(self.cumulative_weights) > 0):
-                total_leaf_keys = set(list(self.number_of_subcategories[-1].keys()) + list(self.cumulative_weights[-1].keys()))
-            else:
-                total_leaf_keys = list(self.number_of_subcategories[-1].keys())
-            for cc in total_leaf_keys:
-                if (cc in tree.keys()):
-                    observation = torch.tensor([0.]) 
-                    if (len(self.cumulative_weights) > 0):
-                        if (cc in self.cumulative_weights[-1].keys()):
-                            observation += self.cumulative_weights[-1][cc]
-                    if (cc in self.hierarchical_observations[-1].keys()):
-                        observation += self.hierarchical_observations[-1][cc]
-                    tree[cc] = INFO(observation, cc, self.hierarchical_distributions[-1][cc])
-            if ('parent' in tree.keys()):
-                prefix = tree.pop('parent')
-                num_categories = (0,)
-                total_num_categories -= 1
-            else:
-                prefix = list(tree.keys())[0][:-1]
-                num_categories = (self.number_of_subcategories[-2][prefix],)
-            if (total_num_categories < self.implied_constraints[self.layers - 1]):
-                new_value = prefix + num_categories
-                tree[new_value] = INFO(self.hyperparameters["nCRP"], new_value, self.base_weight)
-                self.hyperparameters["DP"][new_value] = Gamma(self.gamma_alpha, self.gamma_beta).sample().item()
-        return root
-    
     def _generate_hierarchy_tree(self, debug: bool = False):
         '''
         Generate the distribution tree from the hierarchical distributions
@@ -845,7 +812,7 @@ class HierarchicalDirichletProcess:
                 samples_group_by_category.append(indices[torch.where(sample_category_assignments == i)])
         return categories, samples_group_by_category, counts_by_category
     
-    def _generate_CRP(self, sample_size: int, eta: float):
+    def _generate_CRP(self, sample_size: int, eta: float, random_seed: int):
         '''
         Generate a Chinese Restaurant Process with sample size sample_size and concentration parameter eta
         
@@ -948,4 +915,5 @@ if __name__ == "__main__":
     hp = HierarchicalDirichletProcess(input_dimen, hdp_depth, data.shape[0], hdp_truncate_length, hdp_constraints)
 
     hp.gibbs_update(gibbs_sampling_iterations, data)
+    hp.display_hierarchical_results()
 

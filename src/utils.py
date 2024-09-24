@@ -149,3 +149,20 @@ def transfer_index_tuple_to_tensor(indices: list):
     for index in indices:
         index_tensor.append(torch.tensor(index))
     return torch.stack(index_tensor)
+
+
+def print_tree(d, indent=0):
+    # Loop through dictionary items
+    for key, value in d.items():
+        # Print the key with proper indentation
+        print('    ' * indent + str(key))
+        
+        # If value is another dictionary, recursively call the function
+        if isinstance(value, dict):
+            print_tree(value, indent + 1)
+        # If the value is a tensor, print its content
+        elif isinstance(value, torch.Tensor):
+            print('    ' * (indent + 1) + f'Tensor: {value}')
+        else:
+            # Print the value with additional indentation
+            print('    ' * (indent + 1) + str(value))
