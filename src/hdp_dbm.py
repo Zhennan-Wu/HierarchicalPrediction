@@ -15,6 +15,8 @@ if __name__ == "__main__":
     latent_dimension = 10
     dbm_stable_param = 5
     latent_sample_size = 10
+    batch_index = 1
+    gibbs_iterations = 100
 
     # Test DBM
     dataset = torch.rand(datasize, data_dimension)
@@ -26,7 +28,7 @@ if __name__ == "__main__":
     latent_variables = dbm.generate_top_level_latent_variables(dataset, latent_sample_size)
 
     hp = HierarchicalDirichletProcess(latent_dimension, 3, datasize, 10, {2: 10})    
-    hp.gibbs_update(20, latent_variables)
+    hp.gibbs_update(batch_index, gibbs_iterations, latent_variables)
     latent_distribution = hp.get_latent_distributions()
 
     reconstructed_data = dbm.generate_visible_variables(latent_distribution, latent_sample_size)

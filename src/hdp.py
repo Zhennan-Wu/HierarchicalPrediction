@@ -13,7 +13,7 @@ import time
 import math
 import random
 
-from utils import transfer_index_tensor_to_tuple, transfer_index_tuple_to_tensor, calc_sequential_stick_breaking_weight, print_tree, INFO, DirichletProcess
+from utils import transfer_index_tensor_to_tuple, transfer_index_tuple_to_tensor, calc_sequential_stick_breaking_weight, print_tree, INFO
 
 
 PyTree = Union[jnp.ndarray, List['PyTree'], Tuple['PyTree', ...], Dict[Any, 'PyTree']]
@@ -232,7 +232,9 @@ class HierarchicalDirichletProcess:
             plt.xlabel("Number of Gibbs Sampling Iterations")
             plt.ylabel("Joint Probability")
             plt.title("Joint Probability of the Hierarchical Dirichlet Process")
-            plt.savefig(dir+'batch-{}_round-{}_joint_prob.png'.format(batch_index, round))
+            # plt.savefig(dir+'batch-{}_round-{}_joint_prob.png'.format(batch_index, round))
+            plt.show()
+            plt.close()
 
     def generate_parameters(self):
         '''
@@ -898,6 +900,7 @@ if __name__ == "__main__":
     number_of_latent_sample = 3
 
     gibbs_sampling_iterations = 200
+    batch_index = 1
 
     hdp_depth = 3
     hdp_truncate_length = 10
@@ -914,6 +917,6 @@ if __name__ == "__main__":
 
     hp = HierarchicalDirichletProcess(input_dimen, hdp_depth, data.shape[0], hdp_truncate_length, hdp_constraints)
 
-    hp.gibbs_update(gibbs_sampling_iterations, data)
+    hp.gibbs_update(batch_index, gibbs_sampling_iterations, data)
     hp.display_hierarchical_results()
 
