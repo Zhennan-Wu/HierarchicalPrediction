@@ -254,8 +254,8 @@ if __name__ == "__main__":
 
     batch_size = 1000	
 
-    train_x = train_x[:batch_size*3, :]
-    train_y = train_y[:batch_size*3]    
+    # train_x = train_x[:batch_size*3, :]
+    # train_y = train_y[:batch_size*3]    
 
     datasize = train_x.shape[0]
     data_dimension = train_x.shape[1]
@@ -264,5 +264,5 @@ if __name__ == "__main__":
     dataset = TensorDataset(train_x, train_y)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     
-    dbn = DBN(data_dimension, [200, 50, 5], batch_size, epoch = 10, savefile="dbn.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10)
+    dbn = DBN(data_dimension, [1000, 500, 100], batch_size, epoch = 10, savefile="dbn.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10)
     dbn.train(data_loader)
