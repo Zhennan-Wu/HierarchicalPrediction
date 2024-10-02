@@ -8,7 +8,7 @@
 #SBATCH --mail-user=zwu1@iu.edu
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --time=4-00:00:00
+#SBATCH --time=2-00:00:00
 #SBATCH --mem=32G
 #SBATCH -A r00939
 

@@ -268,5 +268,5 @@ if __name__ == "__main__":
     dataset = TensorDataset(train_x, train_y)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     
-    dbn = DBN(data_dimension, [1000, 500, 100], batch_size, epoch = 200, savefile="dbn.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10)
+    dbn = DBN(data_dimension, [1000, 500, 100], batch_size, epoch = 400, savefile="dbn.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10)
     dbn.train(data_loader)

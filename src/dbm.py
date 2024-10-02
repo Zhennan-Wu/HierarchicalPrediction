@@ -637,6 +637,6 @@ if __name__ == "__main__":
     dataset = TensorDataset(train_x, train_y)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     
-    dbm = DBM(data_dimension, [1000, 500, 100], batch_size, epochs = 200, savefile="dbm.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10)
+    dbm = DBM(data_dimension, [1000, 500, 100], batch_size, epochs = 400, savefile="dbm.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10)
     dbm.load_dbn("dbn.pth")
     dbm.train(data_loader)
