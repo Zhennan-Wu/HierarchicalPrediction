@@ -1,9 +1,10 @@
 import torch
+import time
 from typing import Any, Union, List, Tuple, Dict
 from rbm import RBM
 from torch.utils.data import DataLoader, TensorDataset
-import matplotlib
-matplotlib.use('TkAgg')
+# import matplotlib
+# matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import os
 import numpy as np
@@ -15,7 +16,7 @@ class DBN:
     """
     Deep Boltzmann Machine
     """
-    def __init__(self, input_size: int, layers: list, batch_size: int, epoch: int = 100, savefile: str = None, mode: str = "bernoulli", multinomial_top: bool=False, multinomial_sample_size: int=0, bias: bool = False,  k: int = 5):
+    def __init__(self, input_size: int, layers: list, batch_size: int, epoch: int = 10, savefile: str = None, mode: str = "bernoulli", multinomial_top: bool=False, multinomial_sample_size: int=0, bias: bool = False,  k: int = 5):
         self.input_size = input_size
         self.layers = layers
         self.bias = bias
@@ -113,6 +114,7 @@ class DBN:
         Train DBN
         """
         for index, _ in enumerate(self.layers):
+            start_time = time.time()
             if (index == 0):
                 vn = self.input_size
             else:
@@ -134,6 +136,8 @@ class DBN:
             training_loss = self.calc_training_loss(dataloader, index+1)
             print("Training Loss of DBN with {} layers:".format(index+1), training_loss)
             self.depthwise_training_loss.append(training_loss)
+            end_time = time.time()
+            print("Time taken for training DBN layer", index, "to", index+1, "is", end_time-start_time, "seconds")
 
         if (self.savefile is not None):
             model = self.initialize_model()
@@ -264,5 +268,5 @@ if __name__ == "__main__":
     dataset = TensorDataset(train_x, train_y)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     
-    dbn = DBN(data_dimension, [1000, 500, 100], batch_size, epoch = 10, savefile="dbn.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10)
+    dbn = DBN(data_dimension, [1000, 500, 100], batch_size, epoch = 200, savefile="dbn.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10)
     dbn.train(data_loader)

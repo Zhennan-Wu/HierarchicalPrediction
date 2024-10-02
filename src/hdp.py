@@ -8,7 +8,7 @@ from torch.multiprocessing import Pool
 from typing import Any, Union, List, Tuple, Dict
 
 import matplotlib.pyplot as plt
-plt.switch_backend('TkAgg')
+# plt.switch_backend('TkAgg')
 import time
 import math
 import random

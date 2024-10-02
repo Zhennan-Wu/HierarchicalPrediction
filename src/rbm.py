@@ -1,11 +1,12 @@
 import os
+import time
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, TensorDataset, Dataset
 from tqdm import trange
 from typing import Any, Union, List, Tuple, Dict
-import matplotlib
-matplotlib.use('TkAgg')
+# import matplotlib
+# matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
 from load_dataset import MNIST
@@ -127,6 +128,7 @@ class RBM:
         """
         learning = trange(self.epochs, desc=str("Starting..."))
         for epoch in learning:
+            start_time = time.time()
             train_loss = torch.tensor([0.], device=self.device)
             counter = 0
             for batch_data, _ in dataloader:
@@ -156,6 +158,8 @@ class RBM:
             else:
                 self.previous_loss_before_stagnation = train_loss.item()/counter
                 self.stagnation = 0
+            end_time = time.time()
+            print("Time taken for RBM epoch {} is {:.2f} sec".format(epoch+1, end_time-start_time))
         learning.close()
         if (self.savefile != None):
             if (self.bias):
@@ -197,17 +201,17 @@ if __name__ == "__main__":
     print('MAE for all 0 selection:', torch.mean(train_x))
 
     batch_size = 1000	
+    print(train_x.shape)
+    # train_x = train_x[:batch_size*3, :]
+    # train_y = train_y[:batch_size*3]    
 
-    train_x = train_x[:batch_size*3, :]
-    train_y = train_y[:batch_size*3]    
+    # datasize = train_x.shape[0]
+    # data_dimension = train_x.shape[1]
+    # print(datasize, data_dimension, batch_size)
 
-    datasize = train_x.shape[0]
-    data_dimension = train_x.shape[1]
-    print(datasize, data_dimension, batch_size)
-
-    dataset = TensorDataset(train_x, train_y)
-    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    # dataset = TensorDataset(train_x, train_y)
+    # data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     
-    rbm = RBM(data_dimension, 500, batch_size=batch_size, epochs=10, savefile="rbm.pth")
-    rbm.train(data_loader)
-    rbm.visualize_training_curve()
+    # rbm = RBM(data_dimension, 500, batch_size=batch_size, epochs=10, savefile="rbm.pth")
+    # rbm.train(data_loader)
+    # rbm.visualize_training_curve()

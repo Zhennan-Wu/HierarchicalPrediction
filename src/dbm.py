@@ -1,5 +1,6 @@
 import torch
 import os
+import time
 from typing import Any, Union, List, Tuple, Dict
 from dbn import DBN
 from rbm import RBM
@@ -8,8 +9,8 @@ from tqdm import trange
 from torch.utils.data import DataLoader, TensorDataset
 import pyro.distributions as dist
 
-import matplotlib
-matplotlib.use('TkAgg')
+# import matplotlib
+# matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 
 from load_dataset import MNIST
@@ -342,6 +343,7 @@ class DBM:
             alpha = 0.011
             learning = trange(self.epochs, desc=str("Starting..."))
             for epoch in learning:
+                start_time = time.time()
                 train_loss = torch.tensor([0.], device=self.device)
                 counter = 0
                 mcmc_loader = self.gibbs_update_dataloader(mcmc_loader, gibbs_iterations)
@@ -404,6 +406,7 @@ class DBM:
                     train_loss += torch.mean(torch.abs(dataset - mcmc_samples[0]))
                     counter += 1
                 
+                
                 # did not record the last epoch progress
                 self.progress.append(train_loss.item()/counter)
                 details = {"epoch": epoch+1, "loss": round(train_loss.item()/counter, 4)}
@@ -419,6 +422,14 @@ class DBM:
                 else:
                     self.previous_loss_before_stagnation = train_loss.item()/counter
                     self.stagnation = 0
+                
+                end_time = time.time()
+                print("Time taken for DBM epoch {} is {}".format(epoch, end_time-start_time))
+                if (epoch%50 == 0):
+                    savefile = "dbm_epoch_{}.pth".format(epoch)
+                    torch.save(self.layer_parameters, savefile)
+                    print("Model saved at epoch", epoch)
+
             learning.close()   
 
             self.visualize_training_curve()
@@ -626,6 +637,6 @@ if __name__ == "__main__":
     dataset = TensorDataset(train_x, train_y)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     
-    dbm = DBM(data_dimension, [1000, 500, 100], batch_size, epochs = 10, savefile="dbm.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10)
+    dbm = DBM(data_dimension, [1000, 500, 100], batch_size, epochs = 200, savefile="dbm.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10)
     dbm.load_dbn("dbn.pth")
     dbm.train(data_loader)
