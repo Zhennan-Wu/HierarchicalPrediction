@@ -20,7 +20,7 @@ class DBM:
     """
     Deep Boltzmann Machine
     """
-    def __init__(self, input_size: int, layers: list, batch_size: int, epochs: int = 100, savefile: str = None, mode: str = "bernoulli", multinomial_top: bool=False, multinomial_sample_size: int = 0, bias: bool = False, k: int = 5, early_stopping_patient: int = 5):
+    def __init__(self, input_size: int, layers: list, batch_size: int, epochs: int = 100, savefile: str = None, mode: str = "bernoulli", multinomial_top: bool=False, multinomial_sample_size: int = 0, bias: bool = False, k: int = 5, early_stopping_patient: int = 20):
         self.input_size = input_size
         self.layers = layers
         self.bias = bias
@@ -282,7 +282,6 @@ class DBM:
         plt.ylabel("ELBO")
         plt.title(plt_title)
         plt.savefig(directory+"epoch_{}.png".format(epoch))
-        plt.show()
         plt.close()
 
     def visualize_training_curve(self):
@@ -300,7 +299,6 @@ class DBM:
         plt.xlabel("Epoch")
         plt.ylabel("Loss")
         plt.savefig(directory + plot_title.replace(" ", "_") + ".png")
-        plt.show()
         plt.close()
 
     def visualize_mean_field(self, dataset_index: int, epoch: int):
@@ -317,10 +315,9 @@ class DBM:
             plt.colorbar()
             plt.title(plt_title)
             plt.savefig(directory+"epoch_{}_layer_{}.png".format(epoch, index))
-            plt.show()
             plt.close()
 
-    def train(self, dataloader: DataLoader, mf_maximum_steps: int=100, gibbs_iterations: int=200, mf_threshold: float=0.01, convergence_consecutive_hits: int=3):
+    def train(self, dataloader: DataLoader, gibbs_iterations: int=20, mf_maximum_steps: int=100, mf_threshold: float=0.01, convergence_consecutive_hits: int=3):
         """
         Train DBM
         """
