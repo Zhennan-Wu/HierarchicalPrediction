@@ -41,7 +41,6 @@ class DBM:
         self.previous_loss_before_stagnation = 0
         self.training_loss = []
         self.progress = []
-        self.elbos = []
 
         if (torch.cuda.is_available()):
             self.device = torch.device("cuda")
@@ -206,20 +205,21 @@ class DBM:
         # Update samples (subsample a subset of Markov Chains is excluded, it might need be added later for better performance)
         new_mcmc = [[] for _ in range(len(self.layers)+1)]
         for variables in dataloader:
+            pre_updated_variables = variables
             for _ in range(gibbs_iterations):
                 new_variables = []
                 for index in range(len(self.layers)+1):
                     if (index == 0):
-                        _, var = self.sample_v(index, variables[index+1])
+                        _, var = self.sample_v(index, pre_updated_variables[index+1])
                         new_variables.append(var)
                     elif (index == len(self.layers)):
-                        _, var = self.sample_h(index-1, variables[index-1])
+                        _, var = self.sample_h(index-1, pre_updated_variables[index-1])
                         new_variables.append(var)
                     else:  
-                        _, var = self.sample_h(index-1, variables[index-1], variables[index+1])
+                        _, var = self.sample_h(index-1, pre_updated_variables[index-1], pre_updated_variables[index+1])
                         new_variables.append(var)
-                variables = new_variables
-            for index, var in enumerate(variables):
+                pre_updated_variables = new_variables
+            for index, var in enumerate(pre_updated_variables):
                 new_mcmc[index].append(var)
         new_tensor_variables = []
         for variable in new_mcmc:
@@ -267,7 +267,7 @@ class DBM:
             elbo += entropy
         return elbo
 
-    def visualize_ELBO(self, dataset_index: int, epoch: int):
+    def visualize_ELBO(self, dataset_index: int, epoch: int, elbos: list):
         """
         Visualize the training process
         """
@@ -275,9 +275,9 @@ class DBM:
         if not os.path.exists(directory):
             os.makedirs(directory)
         plt_title = "Training ELBO for epoch {} of dataset {}".format(epoch, dataset_index)
-        x = np.arange(1, len(self.elbos)+1)
+        x = np.arange(1, len(elbos)+1)
         plt.figure()
-        plt.plot(x, np.array(self.elbos))
+        plt.plot(x, np.array(elbos))
         plt.xlabel("Iterations")
         plt.ylabel("ELBO")
         plt.title(plt_title)
@@ -337,17 +337,18 @@ class DBM:
             mcmc_loader = DataLoader(TensorDataset(*tensor_variables), batch_size=self.batch_size, shuffle=False)
 
             # Mean field updates
-            alpha = 0.011
+            alpha = 0.01
+            step_size = alpha/(self.epochs+1)
             learning = trange(self.epochs, desc=str("Starting..."))
             for epoch in learning:
                 start_time = time.time()
                 train_loss = torch.tensor([0.], device=self.device)
                 counter = 0
                 mcmc_loader = self.gibbs_update_dataloader(mcmc_loader, gibbs_iterations)
-                alpha -= 0.001
+                alpha -= step_size
                 dataset_index = 0
                 for dataset, mcmc_samples in zip(dataloader, mcmc_loader):
-                    self.elbos = []
+                    elbos = []
                     dataset = dataset[0].to(self.device)
                     mcmc_samples = [sample.to(self.device) for sample in mcmc_samples]
                     for index, _ in enumerate(self.layers):
@@ -376,7 +377,7 @@ class DBM:
                                 mf_convergence_count[index] += 1
                             else:
                                 mf_convergence_count[index] -=1
-                        self.elbos.append(self.calc_ELBO(dataset).item())
+                        elbos.append(self.calc_ELBO(dataset).item())
                         mf_step += 1
                         if (all(x > convergence_consecutive_hits for x in mf_convergence_count)):
                             print("Mean Field Converged with {} iterations".format(mf_step))
@@ -386,7 +387,7 @@ class DBM:
                         torch.set_printoptions(precision=2)
                         print("For episode {} dataset {}, Mean Field did not converge with layerwise difference {}".format(epoch, dataset_index, mf_difference))
                     
-                    self.visualize_ELBO(dataset_index, epoch)
+                    self.visualize_ELBO(dataset_index, epoch, elbos)
 
                     # Update model parameters
                     for index, _ in enumerate(self.layers):
@@ -402,9 +403,7 @@ class DBM:
 
                     train_loss += torch.mean(torch.abs(dataset - mcmc_samples[0]))
                     counter += 1
-                
-                
-                # did not record the last epoch progress
+
                 self.progress.append(train_loss.item()/counter)
                 details = {"epoch": epoch+1, "loss": round(train_loss.item()/counter, 4)}
                 learning.set_description(str(details))
