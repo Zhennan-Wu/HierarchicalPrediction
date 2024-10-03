@@ -254,7 +254,7 @@ class DBM:
         Calculate the Evidence Lower Bound (ELBO) of the data
         '''
         with torch.no_grad():
-            elbo = torch.tensor([0.], device=self.device)
+            elbo = torch.tensor(0., device=self.device)
             for index in range(len(self.layers)-1):
                 elbo += torch.sum(torch.matmul(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"])*self.layer_mean_field_parameters[index]["mu"])
                 if (self.bias):
@@ -265,7 +265,7 @@ class DBM:
             for index in range(len(self.layers)):
                 entropy += -torch.sum(self.layer_mean_field_parameters[index]["mu"]*torch.log(self.layer_mean_field_parameters[index]["mu"]))
             elbo += entropy
-        return elbo
+        return elbo.item()
 
     def visualize_ELBO(self, dataset_index: int, epoch: int, elbos: list):
         """
@@ -275,9 +275,10 @@ class DBM:
         if not os.path.exists(directory):
             os.makedirs(directory)
         plt_title = "Training ELBO for epoch {} of dataset {}".format(epoch, dataset_index)
-        x = np.arange(1, len(elbos)+1)
+        # x = np.arange(1, len(elbos)+1)
         plt.figure()
-        plt.plot(x, np.array(elbos))
+        # plt.plot(x, np.array(elbos))
+        plt.plot(np.array(elbos))
         plt.xlabel("Iterations")
         plt.ylabel("ELBO")
         plt.title(plt_title)
@@ -317,7 +318,7 @@ class DBM:
             plt.savefig(directory+"epoch_{}_layer_{}.png".format(epoch, index))
             plt.close()
 
-    def train(self, dataloader: DataLoader, gibbs_iterations: int=20, mf_maximum_steps: int=100, mf_threshold: float=0.01, convergence_consecutive_hits: int=3):
+    def train(self, dataloader: DataLoader, gibbs_iterations: int=200, mf_maximum_steps: int=100, mf_threshold: float=0.01, convergence_consecutive_hits: int=3):
         """
         Train DBM
         """
@@ -377,7 +378,7 @@ class DBM:
                                 mf_convergence_count[index] += 1
                             else:
                                 mf_convergence_count[index] -=1
-                        elbos.append(self.calc_ELBO(dataset).item())
+                        elbos.append(self.calc_ELBO(dataset))
                         mf_step += 1
                         if (all(x > convergence_consecutive_hits for x in mf_convergence_count)):
                             print("Mean Field Converged with {} iterations".format(mf_step))
