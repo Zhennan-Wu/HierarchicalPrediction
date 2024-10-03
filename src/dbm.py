@@ -261,7 +261,7 @@ class DBM:
                     elbo += torch.sum(self.layer_mean_field_parameters[index+1]["mu"]*self.layer_parameters[index+1]["hb"])
             elbo += torch.sum(torch.matmul(self.layer_mean_field_parameters[0]["mu"], self.layer_parameters[0]["W"])*data)
 
-            entropy = torch.tensor([0.], device=self.device)
+            entropy = torch.tensor(0., device=self.device)
             for index in range(len(self.layers)):
                 entropy += -torch.sum(self.layer_mean_field_parameters[index]["mu"]*torch.log(self.layer_mean_field_parameters[index]["mu"]))
             elbo += entropy
