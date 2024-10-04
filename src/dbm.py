@@ -261,10 +261,11 @@ class DBM:
                     elbo += torch.sum(self.layer_mean_field_parameters[index+1]["mu"]*self.layer_parameters[index+1]["hb"])
             elbo += torch.sum(torch.matmul(self.layer_mean_field_parameters[0]["mu"], self.layer_parameters[0]["W"])*data)
 
-            entropy = torch.tensor(0., device=self.device)
             for index in range(len(self.layers)):
-                entropy += -torch.sum(self.layer_mean_field_parameters[index]["mu"]*torch.log(self.layer_mean_field_parameters[index]["mu"]))
-            elbo += entropy
+                clamped_mf = torch.clamp(self.layer_mean_field_parameters[index]["mu"], min=1e-3, max=1-1e-3)
+                raw = -clamped_mf*torch.log(clamped_mf) - (1-clamped_mf)*torch.log(1-clamped_mf)                         
+                entropy = torch.sum(raw)
+                elbo += entropy
         return elbo.item()
 
     def visualize_ELBO(self, dataset_index: int, epoch: int, elbos: list):
@@ -275,10 +276,9 @@ class DBM:
         if not os.path.exists(directory):
             os.makedirs(directory)
         plt_title = "Training ELBO for epoch {} of dataset {}".format(epoch, dataset_index)
-        # x = np.arange(1, len(elbos)+1)
+        x = np.arange(1, len(elbos)+1)
         plt.figure()
-        # plt.plot(x, np.array(elbos))
-        plt.plot(np.array(elbos))
+        plt.plot(x, np.array(elbos))
         plt.xlabel("Iterations")
         plt.ylabel("ELBO")
         plt.title(plt_title)
@@ -371,6 +371,9 @@ class DBM:
                                 activation = torch.matmul(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"].t()) + torch.matmul(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"])
 
                             self.layer_mean_field_parameters[index]["mu"] = torch.sigmoid(activation)
+                            if ((self.layer_mean_field_parameters[index]["mu"] < 0).any()):
+                                print(activation)
+                                raise ValueError("Negative Mean Field Parameters")
 
                             new_diff = torch.mean(torch.abs(old_mu - self.layer_mean_field_parameters[index]["mu"])).item()
                             mf_difference.append(new_diff)
@@ -387,7 +390,6 @@ class DBM:
                     if (mf_step == mf_maximum_steps):
                         torch.set_printoptions(precision=2)
                         print("For episode {} dataset {}, Mean Field did not converge with layerwise difference {}".format(epoch, dataset_index, mf_difference))
-                    
                     self.visualize_ELBO(dataset_index, epoch, elbos)
 
                     # Update model parameters
