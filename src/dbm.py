@@ -366,7 +366,7 @@ class DBM:
                             if (index == len(self.layers)-1):
                                 activation = torch.matmul(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"].t())
                             elif (index == 0):
-                                activation = torch.matmul(dataset.to(self.device), self.layer_parameters[index]["W"].t()) + torch.matmul(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"])
+                                activation = torch.matmul(dataset, self.layer_parameters[index]["W"].t()) + torch.matmul(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"])
                             else:
                                 activation = torch.matmul(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"].t()) + torch.matmul(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"])
 
@@ -375,7 +375,7 @@ class DBM:
                                 print(activation)
                                 raise ValueError("Negative Mean Field Parameters")
 
-                            new_diff = torch.mean(torch.abs(old_mu - self.layer_mean_field_parameters[index]["mu"])).item()
+                            new_diff = torch.max(torch.abs(old_mu - self.layer_mean_field_parameters[index]["mu"])).item()
                             mf_difference.append(new_diff)
                             if (new_diff < mf_threshold):
                                 mf_convergence_count[index] += 1
@@ -634,7 +634,7 @@ if __name__ == "__main__":
     print(datasize, data_dimension, batch_size)
 
     dataset = TensorDataset(train_x, train_y)
-    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     
     dbm = DBM(data_dimension, [1000, 500, 100], batch_size, epochs = 400, savefile="dbm.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10)
     dbm.load_dbn("dbn.pth")
