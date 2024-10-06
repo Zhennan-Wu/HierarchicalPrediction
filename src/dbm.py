@@ -319,7 +319,7 @@ class DBM:
             plt.savefig(directory+"epoch_{}_layer_{}.png".format(epoch, index))
             plt.close()
 
-    def train(self, dataloader: DataLoader, gibbs_iterations: int=200, mf_maximum_steps: int=100, mf_threshold: float=0.01, convergence_consecutive_hits: int=3):
+    def train(self, dataloader: DataLoader, gibbs_iterations: int=1, mf_maximum_steps: int=100, mf_threshold: float=0.01, convergence_consecutive_hits: int=3):
         """
         Train DBM
         """
@@ -338,8 +338,6 @@ class DBM:
         mcmc_loader = DataLoader(TensorDataset(*tensor_variables), batch_size=self.batch_size, shuffle=False)
 
         # Mean field updates
-        alpha = 0.01
-        step_size = alpha/(self.epochs+1)
         learning = trange(self.epochs, desc=str("Starting..."))
         for epoch in learning:
             with torch.no_grad():
@@ -347,7 +345,7 @@ class DBM:
                 train_loss = torch.tensor([0.], device=self.device)
                 counter = 0
                 mcmc_loader = self.gibbs_update_dataloader(mcmc_loader, gibbs_iterations)
-                alpha -= step_size
+                alpha =1./(100 + epoch)
                 dataset_index = 0
                 for dataset, mcmc_samples in zip(dataloader, mcmc_loader):
                     elbos = []
