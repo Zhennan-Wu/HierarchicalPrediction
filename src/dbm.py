@@ -51,6 +51,7 @@ class DBM:
         """
         Sample visible units given hidden units
         """
+        y = y.to(self.device)
         W = self.layer_parameters[layer_index]["W"]
         if (self.bias):
             hb = self.layer_parameters[layer_index]["hb"]
@@ -238,7 +239,7 @@ class DBM:
             new_variables = []
             for index in range(len(self.layers)+1):
                 if (index == 0):
-                    _, var = self.sample_v(index+1, variables[index+1])
+                    _, var = self.sample_v(index, variables[index+1])
                     new_variables.append(var)
                 elif (index == len(self.layers)):
                     _, var = self.sample_h(index-1, variables[index-1])
@@ -322,26 +323,26 @@ class DBM:
         """
         Train DBM
         """
-        with torch.no_grad():
-            # Initialize mean field parameters
-            variables = [[] for _ in range(len(self.layers)+1)]
-            for data, _ in dataloader:
-                for index in range(len(self.layers)+1):
-                    if (index == 0):
-                        variables[index].append(data)
-                    else:
-                        variables[index].append(self.generate_input_for_layer(index, data))
-            
-            tensor_variables = []
-            for variable in variables:
-                tensor_variables.append(torch.cat(variable))
-            mcmc_loader = DataLoader(TensorDataset(*tensor_variables), batch_size=self.batch_size, shuffle=False)
+        # Initialize mean field parameters
+        variables = [[] for _ in range(len(self.layers)+1)]
+        for data, _ in dataloader:
+            for index in range(len(self.layers)+1):
+                if (index == 0):
+                    variables[index].append(data)
+                else:
+                    variables[index].append(self.generate_input_for_layer(index, data))
+        
+        tensor_variables = []
+        for variable in variables:
+            tensor_variables.append(torch.cat(variable))
+        mcmc_loader = DataLoader(TensorDataset(*tensor_variables), batch_size=self.batch_size, shuffle=False)
 
-            # Mean field updates
-            alpha = 0.01
-            step_size = alpha/(self.epochs+1)
-            learning = trange(self.epochs, desc=str("Starting..."))
-            for epoch in learning:
+        # Mean field updates
+        alpha = 0.01
+        step_size = alpha/(self.epochs+1)
+        learning = trange(self.epochs, desc=str("Starting..."))
+        for epoch in learning:
+            with torch.no_grad():
                 start_time = time.time()
                 train_loss = torch.tensor([0.], device=self.device)
                 counter = 0
@@ -412,15 +413,15 @@ class DBM:
                 learning.set_description(str(details))
                 learning.refresh()    
 
-                if (train_loss.item()/counter > self.previous_loss_before_stagnation and epoch>self.early_stopping_patient+1):
-                    self.stagnation += 1
-                    if (self.stagnation == self.early_stopping_patient-1):
-                        learning.close()
-                        print("Not Improving the stopping training loop.")
-                        break
-                else:
-                    self.previous_loss_before_stagnation = train_loss.item()/counter
-                    self.stagnation = 0
+                # if (train_loss.item()/counter > self.previous_loss_before_stagnation and epoch>self.early_stopping_patient+1):
+                #     self.stagnation += 1
+                #     if (self.stagnation == self.early_stopping_patient-1):
+                #         learning.close()
+                #         print("Not Improving the stopping training loop.")
+                #         break
+                # else:
+                #     self.previous_loss_before_stagnation = train_loss.item()/counter
+                #     self.stagnation = 0
                 
                 end_time = time.time()
                 print("Time taken for DBM epoch {} is {}".format(epoch, end_time-start_time))
@@ -429,13 +430,13 @@ class DBM:
                     torch.save(self.layer_parameters, savefile)
                     print("Model saved at epoch", epoch)
 
-            learning.close()   
+        learning.close()   
 
-            self.visualize_training_curve()
+        self.visualize_training_curve()
 
-            if (self.savefile != None):
-                model = self.initialize_model()
-                torch.save(model, self.savefile)        
+        if (self.savefile != None):
+            model = self.initialize_model()
+            torch.save(model, self.savefile)        
 
     def reconstructor(self, x: torch.Tensor, depth: int = -1) -> torch.Tensor:
         """

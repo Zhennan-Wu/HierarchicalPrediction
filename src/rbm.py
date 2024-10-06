@@ -16,7 +16,7 @@ class RBM:
     """
     Restricted Boltzmann Machine
     """
-    def __init__(self, num_visible: int, num_hidden: int, batch_size: int = 32,  epochs: int = 5, savefile: str = None, bias: bool = False, lr: float = 0.001, mode: str = "bernoulli", multinomial_sample_size: int = 0, k: int = 3, optimizer: str = "adam", early_stopping_patient: int = 5):
+    def __init__(self, num_visible: int, num_hidden: int, batch_size: int = 32, epochs: int = 5, savefile: str = None, bias: bool = False, lr: float = 0.001, mode: str = "bernoulli", multinomial_sample_size: int = 0, k: int = 3, optimizer: str = "adam", early_stopping_patient: int = 5):
         self.mode = mode
         self.multinomial_sample_size = multinomial_sample_size
         self.bias = bias
