@@ -1,0 +1,4 @@
+miniconda version 24.1.2 python3.11.7 unloaded.
+miniconda version 24.1.2 python3.11.7 loaded.
+Starting...:   0%|          | 0/400 [00:00<?, ?it/s]{'epoch': 1, 'loss': 0.1996}:   0%|          | 0/400 [22:26<?, ?it/s]{'epoch': 1, 'loss': 0.1996}:   0%|          | 0/400 [22:26<?, ?it/s]{'epoch': 1, 'loss': 0.1996}:   0%|          | 1/400 [22:26<149:15:57, 1346.76s/it]{'epoch': 2, 'loss': 0.1975}:   0%|          | 1/400 [40:38<149:15:57, 1346.76s/it]{'epoch': 2, 'loss': 0.1975}:   0%|          | 1/400 [40:38<149:15:57, 1346.76s/it]{'epoch': 2, 'loss': 0.1975}:   0%|          | 2/400 [40:38<132:19:22, 1196.89s/it]slurmstepd: error: *** STEP 3802200.0 ON nid0648 CANCELLED AT 2024-10-06T16:11:14 ***
+slurmstepd: error: *** JOB 3802200 ON nid0648 CANCELLED AT 2024-10-06T16:11:14 ***

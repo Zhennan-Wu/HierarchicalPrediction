@@ -1,0 +1,143 @@
+MAE for all 0 selection: tensor(0.1307)
+60000 784 1000
+Loaded Layer 0
+Loaded Layer 1
+Loaded Layer 2
+For episode 0 dataset 1, Mean Field did not converge with layerwise difference [0.0051541924476623535, 0.0208132266998291, 0.012537121772766113]
+For episode 0 dataset 2, Mean Field did not converge with layerwise difference [0.018780246376991272, 0.0683259665966034, 0.04635214805603027]
+For episode 0 dataset 3, Mean Field did not converge with layerwise difference [0.015237212181091309, 0.04528006911277771, 0.015085816383361816]
+For episode 0 dataset 4, Mean Field did not converge with layerwise difference [0.017753690481185913, 0.05650252103805542, 0.044882357120513916]
+For episode 0 dataset 5, Mean Field did not converge with layerwise difference [0.006908833980560303, 0.023785412311553955, 0.007656514644622803]
+For episode 0 dataset 6, Mean Field did not converge with layerwise difference [0.14157900214195251, 0.36393290758132935, 0.2531781792640686]
+For episode 0 dataset 7, Mean Field did not converge with layerwise difference [0.04060935974121094, 0.12082898616790771, 0.07564660906791687]
+For episode 0 dataset 8, Mean Field did not converge with layerwise difference [0.015372663736343384, 0.031160786747932434, 0.018574416637420654]
+For episode 0 dataset 9, Mean Field did not converge with layerwise difference [0.062046848237514496, 0.19938765466213226, 0.14226216077804565]
+For episode 0 dataset 10, Mean Field did not converge with layerwise difference [0.05133777856826782, 0.1592937707901001, 0.08219265937805176]
+For episode 0 dataset 11, Mean Field did not converge with layerwise difference [0.0033202767372131348, 0.008811771869659424, 0.005341172218322754]
+For episode 0 dataset 12, Mean Field did not converge with layerwise difference [0.005197495222091675, 0.005770564079284668, 0.004345804452896118]
+For episode 0 dataset 13, Mean Field did not converge with layerwise difference [0.0024078786373138428, 0.009879827499389648, 0.0069175660610198975]
+For episode 0 dataset 14, Mean Field did not converge with layerwise difference [0.005040079355239868, 0.009979292750358582, 0.0059909820556640625]
+For episode 0 dataset 15, Mean Field did not converge with layerwise difference [0.0036381781101226807, 0.0048167407512664795, 0.0020821094512939453]
+For episode 0 dataset 16, Mean Field did not converge with layerwise difference [0.01238185167312622, 0.04672783613204956, 0.0197296142578125]
+For episode 0 dataset 17, Mean Field did not converge with layerwise difference [0.1947585642337799, 0.5171110033988953, 0.2182791829109192]
+For episode 0 dataset 18, Mean Field did not converge with layerwise difference [7.070600986480713e-05, 8.505582809448242e-05, 1.6450881958007812e-05]
+For episode 0 dataset 19, Mean Field did not converge with layerwise difference [0.0009664595127105713, 0.0021326541900634766, 0.0012467801570892334]
+For episode 0 dataset 20, Mean Field did not converge with layerwise difference [0.008654892444610596, 0.012765258550643921, 0.0008831620216369629]
+For episode 0 dataset 21, Mean Field did not converge with layerwise difference [0.00039708614349365234, 0.0007701516151428223, 0.00025856494903564453]
+For episode 0 dataset 22, Mean Field did not converge with layerwise difference [4.157423973083496e-06, 4.947185516357422e-06, 3.844499588012695e-06]
+For episode 0 dataset 23, Mean Field did not converge with layerwise difference [1.1920928955078125e-07, 2.384185791015625e-07, 5.960464477539063e-08]
+For episode 0 dataset 24, Mean Field did not converge with layerwise difference [0.5966745615005493, 0.7796030044555664, 0.11086088418960571]
+For episode 0 dataset 25, Mean Field did not converge with layerwise difference [3.039836883544922e-06, 7.867813110351562e-06, 1.6093254089355469e-06]
+Mean Field Converged with 82 iterations
+Mean Field Converged with 34 iterations
+Mean Field Converged with 34 iterations
+Mean Field Converged with 30 iterations
+Mean Field Converged with 28 iterations
+Mean Field Converged with 20 iterations
+Mean Field Converged with 16 iterations
+Mean Field Converged with 14 iterations
+Mean Field Converged with 14 iterations
+Mean Field Converged with 12 iterations
+Mean Field Converged with 12 iterations
+Mean Field Converged with 12 iterations
+Mean Field Converged with 12 iterations
+Mean Field Converged with 12 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Time taken for DBM epoch 0 is 1346.666678905487
+Model saved at epoch 0
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Time taken for DBM epoch 1 is 1091.9802963733673
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
+Mean Field Converged with 10 iterations
