@@ -345,7 +345,7 @@ class DBM:
                 train_loss = torch.tensor([0.], device=self.device)
                 counter = 0
                 mcmc_loader = self.gibbs_update_dataloader(mcmc_loader, gibbs_iterations)
-                alpha =1./(100 + epoch)
+                alpha =1./(1000 + epoch)
                 dataset_index = 0
                 for dataset, mcmc_samples in zip(dataloader, mcmc_loader):
                     elbos = []
