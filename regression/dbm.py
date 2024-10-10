@@ -319,7 +319,7 @@ class DBM:
             plt.savefig(directory+"epoch_{}_layer_{}.png".format(epoch, index))
             plt.close()
 
-    def train(self, dataloader: DataLoader, gibbs_iterations: int=1, mf_maximum_steps: int=100, mf_threshold: float=0.01, convergence_consecutive_hits: int=3):
+    def train(self, dataloader: DataLoader, gibbs_iterations: int=3, mf_maximum_steps: int=100, mf_threshold: float=0.01, convergence_consecutive_hits: int=3):
         """
         Train DBM
         """
@@ -402,8 +402,8 @@ class DBM:
                             if (self.bias):
                                 self.layer_parameters[index]["hb"] = self.layer_parameters[index]["hb"] + alpha * torch.sum(self.layer_mean_field_parameters[index]["mu"] - mcmc_samples[index+1], dim=0)/self.batch_size
 
-
-                    train_loss += torch.mean(torch.abs(dataset - mcmc_samples[0]))
+                    reconstructed_data, _ = self.reconstructor(dataset, gibbs_iterations)
+                    train_loss += torch.mean(torch.abs(dataset - reconstructed_data.to(self.device)))
                     counter += 1
 
                 self.progress.append(train_loss.item()/counter)
@@ -436,7 +436,7 @@ class DBM:
             model = self.initialize_model()
             torch.save(model, self.savefile)        
 
-    def reconstructor(self, x: torch.Tensor, depth: int = -1) -> torch.Tensor:
+    def reconstructor(self, x: torch.Tensor, repeat: int = 1, depth: int = -1) -> torch.Tensor:
         """
         Reconstruct input
         """
@@ -444,29 +444,31 @@ class DBM:
             depth = len(self.layers)
         
         x = x.to(self.device)
-        x_gen = []
-        for _ in range(self.k):
-            x_dash = x.clone()
-            for i in range(depth):
-                _, x_dash = self.sample_h(i, x_dash)
-            x_gen.append(x_dash)
-        x_dash = torch.stack(x_gen)
-        x_dash = torch.mean(x_dash, dim=0)
+        for _ in range(repeat):
+            x_gen = []
+            for _ in range(self.k):
+                x_dash = x.clone()
+                for i in range(depth):
+                    _, x_dash = self.sample_h(i, x_dash)
+                x_gen.append(x_dash)
+            x_dash = torch.stack(x_gen)
+            x_dash = torch.mean(x_dash, dim=0)
 
-        y = x_dash
+            y = x_dash
 
-        y_gen = []
-        for _ in range(self.k):
-            y_dash = y.clone()
-            for i in range(depth-1, -1, -1):
-                _, y_dash = self.sample_v(i, y_dash)
-            y_gen.append(y_dash)
-        y_dash = torch.stack(y_gen)
-        y_dash = torch.mean(y_dash, dim=0)
+            y_gen = []
+            for _ in range(self.k):
+                y_dash = y.clone()
+                for i in range(depth-1, -1, -1):
+                    _, y_dash = self.sample_v(i, y_dash)
+                y_gen.append(y_dash)
+            y_dash = torch.stack(y_gen)
+            y_dash = torch.mean(y_dash, dim=0)
+            x = y_dash
 
         return y_dash, x_dash
 
-    def reconstruct(self, dataloader: DataLoader, depth: int = -1) -> DataLoader:
+    def reconstruct(self, dataloader: DataLoader, repeat: int = 1, depth: int = -1) -> DataLoader:
         """
         Reconstruct input
         """
@@ -474,7 +476,7 @@ class DBM:
         latent_vars = []
         data_labels = []
         for batch, label in dataloader:
-            visible, latent = self.reconstructor(batch, depth)
+            visible, latent = self.reconstructor(batch, repeat, depth)
             visible_data.append(visible)
             latent_vars.append(latent)
             data_labels.append(label)

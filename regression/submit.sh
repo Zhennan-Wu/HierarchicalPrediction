@@ -20,5 +20,5 @@ conda activate hdp
 
 #Run your program
 # srun python3 ./dbn.py 
-# srun python3 ./dbm.py
-srun python3 ./hdp_dbm.py
+srun python3 ./dbm.py
+# srun python3 ./hdp_dbm.py
