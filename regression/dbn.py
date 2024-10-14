@@ -17,6 +17,11 @@ class DBN:
     Deep Boltzmann Machine
     """
     def __init__(self, input_size: int, layers: list, batch_size: int, epoch: int = 10, savefile: str = None, mode: str = "bernoulli", multinomial_top: bool=False, multinomial_sample_size: int=0, bias: bool = False, k: int = 5, gaussian_top = False, top_sigma: float = 1, sigma: float = 1, disc_alpha: float = 0.):
+        if (torch.cuda.is_available()):
+            self.device = torch.device("cuda")
+        else:
+            self.device = torch.device("cpu")
+
         self.input_size = input_size
         self.layers = layers
         self.bias = bias
@@ -25,8 +30,8 @@ class DBN:
         self.k = k
         self.mode = mode
         self.gaussian_top = gaussian_top
-        self.sigma = sigma*torch.ones((input_size,), dtype=torch.float32)
-        self.top_sigma = top_sigma*torch.ones((1,), dtype=torch.float32)
+        self.sigma = sigma*torch.ones((input_size,), dtype=torch.float32, device=self.device)
+        self.top_sigma = top_sigma*torch.ones((1,), dtype=torch.float32, device=self.device)
         self.savefile = savefile
         self.epoch = epoch
         self.multinomial_top = multinomial_top
@@ -35,17 +40,13 @@ class DBN:
         self.top_parameters = {"W":None, "hb":None, "vb":None}
         self.disc_alpha = disc_alpha
 
-        if (torch.cuda.is_available()):
-            self.device = torch.device("cuda")
-        else:
-            self.device = torch.device("cpu")
 
     def sample_v(self, layer_index: int, y: torch.Tensor) -> torch.Tensor:
         """
         Sample visible units given hidden units
         """
-        W = self.layer_parameters[layer_index]["W"].to(self.device)
-        hb = self.layer_parameters[layer_index]["hb"].to(self.device)
+        W = self.layer_parameters[layer_index]["W"]
+        hb = self.layer_parameters[layer_index]["hb"]
         activation = torch.matmul(y, W) + hb
 
         if (self.mode == "bernoulli"):
@@ -64,9 +65,9 @@ class DBN:
         """
         Sample hidden units given visible units
         """
-        x_bottom = x_bottom.to(self.device)
-        W_bottom = self.layer_parameters[layer_index]["W"].to(self.device)
-        b_bottom = self.layer_parameters[layer_index]["vb"].to(self.device)
+        x_bottom = x_bottom
+        W_bottom = self.layer_parameters[layer_index]["W"]
+        b_bottom = self.layer_parameters[layer_index]["vb"]
         if (layer_index == 0):
             activation = (torch.matmul(x_bottom, W_bottom.t()) + b_bottom)/self.sigma
         else:    
@@ -74,7 +75,7 @@ class DBN:
 
         if (layer_index == len(self.layers)-1 and self.multinomial_top):
             if (top_down_sample):
-                activation = activation + (torch.matmul(label, self.top_parameters["W"].to(self.device)) + self.top_parameters["hb"].to(self.device))/self.top_sigma
+                activation = activation + (torch.matmul(label, self.top_parameters["W"]) + self.top_parameters["hb"])/self.top_sigma
             p_h_given_v = torch.softmax(activation, dim=1)
             indices = torch.multinomial(p_h_given_v, self.multinomial_sample_size, replacement=True)
             one_hot = torch.zeros(p_h_given_v.size(0), self.multinomial_sample_size, p_h_given_v.size(1), device=self.device).scatter_(2, indices.unsqueeze(-1), 1)
@@ -252,9 +253,9 @@ class DBN:
         model = torch.load(savefile)
         layer_parameters = []
         for index in range(len(model)):
-            layer_parameters.append({"W":model["W"][index], "hb":model["hb"][index], "vb":model["vb"][index]})
+            layer_parameters.append({"W":model["W"][index].to(self.device), "hb":model["hb"][index].to(self.device), "vb":model["vb"][index].to(self.device)})
         
-        top_parameters = {"W":model["TW"][0], "hb":model["tb"][0], "vb":layer_parameters[-1]["hb"]}
+        top_parameters = {"W":model["TW"][0].to(self.device), "hb":model["tb"][0].to(self.device), "vb":layer_parameters[-1]["hb".to(self.device)]}
         self.layer_parameters = layer_parameters
         self.top_parameters = top_parameters
 

@@ -20,6 +20,10 @@ class RBM:
         """
         Initialize RBM
         """
+        if (torch.cuda.is_available()):
+            self.device = torch.device("cuda")
+        else:
+            self.device = torch.device("cpu")
         self.mode = mode
         self.multinomial_sample_size = multinomial_sample_size
         self.bias = bias
@@ -43,14 +47,9 @@ class RBM:
         self.previous_loss_before_stagnation = 0
         self.progress = []
         self.gaussian_top = gaussian_top
-        self.top_sigma = top_sigma*torch.ones((1,), dtype = torch.float32)
-        self.sigma = sigma*torch.ones((num_visible,), dtype = torch.float32)
+        self.top_sigma = top_sigma*torch.ones((1,), dtype = torch.float32, device=self.device)
+        self.sigma = sigma*torch.ones((num_visible,), dtype = torch.float32, device=self.device)
         self.disc_alpha = disc_alpha
-
-        if (torch.cuda.is_available()):
-            self.device = torch.device("cuda")
-        else:
-            self.device = torch.device("cpu")
 
         # Initialize weights (handle different mode and setting here by initialization)
         std = 4*np.sqrt(6./(self.num_visible + self.num_hidden))  
@@ -91,7 +90,6 @@ class RBM:
         Sample visible units given hidden units
         """
         activation = torch.mm(y, self.weights) + self.hidden_bias
-
         if (self.mode == "gaussian"):
             mean = activation*self.sigma
             gaussian_dist = torch.distributions.normal.Normal(mean, self.sigma)
@@ -265,17 +263,13 @@ if __name__ == "__main__":
     print('MAE for all 0 selection:', torch.mean(train_x))
 
     batch_size = 1000	
-    print(train_x.shape)
-    # train_x = train_x[:batch_size*3, :]
-    # train_y = train_y[:batch_size*3]    
+    datasize = train_x.shape[0]
+    data_dimension = train_x.shape[1]
+    print("The whole dataset has {} data. The dimension of each data is {}. Batch size is {}.".format(datasize, data_dimension, batch_size))
 
-    # datasize = train_x.shape[0]
-    # data_dimension = train_x.shape[1]
-    # print(datasize, data_dimension, batch_size)
-
-    # dataset = TensorDataset(train_x, train_y)
-    # data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    dataset = TensorDataset(train_x, train_y)
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     
-    # rbm = RBM(data_dimension, 500, batch_size=batch_size, epochs=10, savefile="rbm.pth")
-    # rbm.train(data_loader)
-    # rbm.visualize_training_curve()
+    rbm = RBM(data_dimension, num_hidden=500, batch_size=batch_size, epochs=10, savefile="rbm.pth", bias = False, lr = 0.001, mode = "bernoulli", multinomial_sample_size = 10, k = 3, optimizer = "adam", early_stopping_patient = 5, gaussian_top = True, top_sigma = 3.0, sigma = 1.0, disc_alpha = 0.5)
+    rbm.train(data_loader)
+    rbm.visualize_training_curve()

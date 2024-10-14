@@ -25,6 +25,7 @@ class DBM:
             self.device = torch.device("cuda")
         else:
             self.device = torch.device("cpu")
+
         self.input_size = input_size
         self.layers = layers
         self.bias = bias
@@ -48,12 +49,10 @@ class DBM:
         self.training_loss = []
         self.progress = []
 
-
     def sample_v(self, layer_index: int, y: torch.Tensor) -> torch.Tensor:
         """
         Sample visible units given hidden units
         """
-        y = y.to(self.device)
         W = self.layer_parameters[layer_index]["W"]
         hb = self.layer_parameters[layer_index]["hb"]
         activation = torch.matmul(y, W) + hb
@@ -73,7 +72,6 @@ class DBM:
         """
         Sample hidden units given visible units
         """
-        x_bottom = x_bottom.to(self.device)
         W_bottom = self.layer_parameters[layer_index]["W"]
         b_bottom = self.layer_parameters[layer_index]["hb"]
         if (layer_index == len(self.layers)-1):
@@ -199,9 +197,9 @@ class DBM:
         model = torch.load(savefile)
         layer_parameters = []
         for index in range(len(model)):
-            layer_parameters.append({"W":model["W"][index], "hb":model["hb"][index], "vb":model["vb"][index]})
+            layer_parameters.append({"W":model["W"][index].to(self.device), "hb":model["hb"][index].to(self.device), "vb":model["vb"][index].to(self.device)})
         
-        top_parameters = {"W":model["TW"][0], "hb":model["tb"][0], "vb":layer_parameters[-1]["hb"]}
+        top_parameters = {"W":model["TW"][0].to(self.device), "hb":model["tb"][0].to(self.device), "vb":layer_parameters[-1]["hb"].to(self.device)}
         self.layer_parameters = layer_parameters
         self.top_parameters = top_parameters
 
@@ -260,6 +258,7 @@ class DBM:
     
     def gibbs_update_dataloader(self, dataloader: DataLoader, gibbs_iterations, discriminator: bool = False) -> DataLoader:
         """
+        Gibbs update dataloader
         """
         # Update samples (subsample a subset of Markov Chains is excluded, it might need be added later for better performance)
         new_mcmc = [[] for _ in range(len(self.layers)+1)]
@@ -309,6 +308,7 @@ class DBM:
 
     def gibbs_update(self, data: torch.Tensor, label: torch.Tensor, gibbs_iterations: int) -> List[torch.Tensor]:
         """
+        Gibbs update for reconstruction
         """
         # Update samples (subsample a subset of Markov Chains is excluded, it might need be added later for better performance)
         variables = []
@@ -317,17 +317,16 @@ class DBM:
         variables.append(label)
         for _ in range(gibbs_iterations):
             new_variables = []
-            for index in range(len(self.layers)+1):
+            for index in range(len(self.layers)+2):
                 if (index == 0):
                     _, var = self.sample_v(index, variables[index+1])
                     new_variables.append(var)
-                elif (index == len(self.layers)):
-                    _, var = self.sample_h(index-1, variables[index-1], variables[index+1])
+                elif (index == len(self.layers)+1):
+                    _, var = self.sample_r(variables[-1])
                     new_variables.append(var)
                 else:  
                     _, var = self.sample_h(index-1, variables[index-1], variables[index+1])
                     new_variables.append(var)
-            _, var = self.sample_r(variables[-1])
             variables = new_variables
         return variables
     
@@ -383,22 +382,6 @@ class DBM:
         plt.ylabel("Loss")
         plt.savefig(directory + plot_title.replace(" ", "_") + ".png")
         plt.close()
-
-    def visualize_mean_field(self, dataset_index: int, epoch: int):
-        """
-        Visualize the training process
-        """
-        directory = "../results/plots/DBM/MeanField/dataset_{}/".format(dataset_index) 
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-        for index, layer in enumerate(self.layer_mean_field_parameters):
-            plt_title = "Mean Field for layer {} of epoch {} of dataset {}".format(index, epoch, dataset_index)
-            plt.figure()
-            plt.imshow(layer["mu"].cpu().detach().numpy())
-            plt.colorbar()
-            plt.title(plt_title)
-            plt.savefig(directory+"epoch_{}_layer_{}.png".format(epoch, index))
-            plt.close()
 
     def train(self, dataloader: DataLoader, gibbs_iterations: int=3, mf_maximum_steps: int=100, mf_threshold: float=0.01, convergence_consecutive_hits: int=3):
         """
