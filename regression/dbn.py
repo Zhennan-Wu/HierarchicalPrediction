@@ -16,22 +16,27 @@ class DBN:
     """
     Deep Boltzmann Machine
     """
-    def __init__(self, input_size: int, layers: list, batch_size: int, epoch: int = 10, savefile: str = None, mode: str = "bernoulli", multinomial_top: bool=False, multinomial_sample_size: int=0, bias: bool = False,  k: int = 5):
+    def __init__(self, input_size: int, layers: list, batch_size: int, epoch: int = 10, savefile: str = None, mode: str = "bernoulli", multinomial_top: bool=False, multinomial_sample_size: int=0, bias: bool = False, k: int = 5, gaussian_top = False, top_sigma: float = 1, sigma: float = 1, disc_alpha: float = 0.):
         self.input_size = input_size
         self.layers = layers
         self.bias = bias
         self.batch_size = batch_size
         if (self.bias):
-            self.layer_parameters = [{"W":None, "hb":None} for _ in range(len(layers))]
+            self.layer_parameters = [{"W":None, "hb":None, "vb":None} for _ in range(len(layers))]
         else:
             self.layer_parameters = [{"W":None} for _ in range(len(layers))]
         self.k = k
         self.mode = mode
+        self.gaussian_top = gaussian_top
+        self.sigma = sigma
+        self.top_sigma = top_sigma
         self.savefile = savefile
         self.epoch = epoch
         self.multinomial_top = multinomial_top
         self.multinomial_sample_size = multinomial_sample_size
         self.depthwise_training_loss = []
+        self.top_parameters = {"W":None, "hb":None, "vb":None}
+        self.disc_alpha = disc_alpha
 
         if (torch.cuda.is_available()):
             self.device = torch.device("cuda")
@@ -48,41 +53,68 @@ class DBN:
             activation = torch.matmul(y, W) + hb
         else:
             activation = torch.matmul(y, W)
-        p_v_given_h = torch.sigmoid(activation)
         if (self.mode == "bernoulli"):
+            p_v_given_h = torch.sigmoid(activation)
             return p_v_given_h, torch.bernoulli(p_v_given_h)
         elif (self.mode == "gaussian"):
-            return p_v_given_h, torch.add(p_v_given_h, torch.normal(mean=0, std=1, size=p_v_given_h.shape, device=self.device))
+            mean = activation*self.sigma
+            dist = torch.distributions.normal.Normal(mean, self.sigma)
+            sample = dist.sample()
+            p_v_given_h = torch.exp(dist.log_prob(sample))
+            return p_v_given_h, sample.to(self.device)
         else:
             raise ValueError("Invalid mode")
     
-    def sample_h(self, layer_index: int, x_bottom: torch.Tensor) -> torch.Tensor:
+    def sample_h(self, layer_index: int, x_bottom: torch.Tensor, label: torch.Tensor, top_down_sample: bool=False) -> torch.Tensor:
         """
         Sample hidden units given visible units
         """
         x_bottom = x_bottom.to(self.device)
         W_bottom = self.layer_parameters[layer_index]["W"].to(self.device)
         if (self.bias):
-            b_bottom = self.layer_parameters[layer_index]["hb"].to(self.device)
-            activation = torch.matmul(x_bottom, W_bottom.t()) + b_bottom 
+            b_bottom = self.layer_parameters[layer_index]["vb"].to(self.device)
+            if (layer_index == 0 and self.mode == "gaussian"):
+                activation =(torch.matmul(x_bottom, W_bottom.t()) + b_bottom)/self.sigma 
+            else:
+                activation = torch.matmul(x_bottom, W_bottom.t()) + b_bottom 
         else:
-            activation = torch.matmul(x_bottom, W_bottom.t())
+            if (layer_index == 0 and self.mode == "gaussian"):
+                activation = torch.matmul(x_bottom, W_bottom.t())/self.sigma
+            else:
+                activation = torch.matmul(x_bottom, W_bottom.t())
 
         if (layer_index == len(self.layers)-1 and self.multinomial_top):
+            if (top_down_sample):
+                if (self.bias):
+                    activation = activation + (torch.matmul(label, self.top_parameters["W"].to(self.device)) + self.top_parameters["hb"].to(self.device))/self.top_sigma
+                else:
+                    activation = activation + torch.matmul(label, self.top_parameters["W"].to(self.device))/self.top_sigma
             p_h_given_v = torch.softmax(activation, dim=1)
             indices = torch.multinomial(p_h_given_v, self.multinomial_sample_size, replacement=True)
             one_hot = torch.zeros(p_h_given_v.size(0), self.multinomial_sample_size, p_h_given_v.size(1), device=self.device).scatter_(2, indices.unsqueeze(-1), 1)
             variables = torch.sum(one_hot, dim=1)
-            return p_h_given_v, variables
-        
-        p_h_given_v = torch.sigmoid(activation)
-        if (self.mode == "bernoulli"):
-            return p_h_given_v, torch.bernoulli(p_h_given_v)
-        elif (self.mode == "gaussian"):
-            return p_h_given_v, torch.add(p_h_given_v, torch.normal(mean=0, std=1, size=p_h_given_v.shape, device=self.device))
         else:
-            raise ValueError("Invalid mode")
+            p_h_given_v = torch.sigmoid(activation)
+            variables = torch.bernoulli(p_h_given_v)
+        return p_h_given_v, variables
     
+    def sample_r(self, x_bottom: torch.Tensor) -> torch.Tensor:
+        """
+        Sample reconstruction
+        """
+        if (self.gaussian_top):
+            if (self.bias):
+                mean = (torch.mm(x_bottom, self.top_parameters["W"].t()) + self.top_parameters["vb"])*self.sigma
+            else:
+                mean = torch.mm(x_bottom, self.top_parameters["W"].t())*self.sigma
+            
+            dist = torch.distributions.normal.Normal(mean, self.sigma)
+            sample = dist.sample()
+            p_r_given_h = torch.exp(dist.log_prob(sample))
+            return p_r_given_h, sample.to(self.device)
+        else:
+            raise ValueError("The model does not have Gaussian top layer")
+        
     def generate_input_for_layer(self, index: int, dataloader: DataLoader) -> DataLoader:
         """
         Generate input for layer
@@ -97,7 +129,7 @@ class DBN:
                 for _ in range(self.k):
                     x_dash = batch.to(self.device)
                     for i in range(index):
-                        _, x_dash = self.sample_h(i, x_dash)
+                        _, x_dash = self.sample_h(i, x_dash, label)
                     x_gen.append(x_dash.detach())
                 x_dash = torch.stack(x_gen)
                 x_dash = torch.mean(x_dash, dim=0)
@@ -125,12 +157,20 @@ class DBN:
                     mode = "multinomial"
             else:
                 mode = self.mode
-            rbm = RBM(vn, hn, self.batch_size, epochs=self.epoch, savefile="{}th layer_rbm.pth".format(index+1), bias = False, lr=0.0005, mode = mode, multinomial_sample_size=self.multinomial_sample_size, k=10, optimizer="adam", early_stopping_patient=10)
+            rbm = RBM(vn, hn, self.batch_size, epochs=self.epoch, savefile="{}th layer_rbm.pth".format(index+1), bias = False, lr=0.0005, mode = mode, multinomial_sample_size=self.multinomial_sample_size, k=10, optimizer="adam", early_stopping_patient=10, gaussian_top=self.gaussian_top, top_sigma=self.top_sigma, sigma=self.sigma, disc_alpha=self.disc_alpha)
 
             hidden_loader = self.generate_input_for_layer(index, dataloader)
 
             rbm.train(hidden_loader)
             self.layer_parameters[index]["W"] = rbm.weights
+            if (self.bias):
+                self.layer_parameters[index]["hb"] = rbm.hidden_bias
+                self.layer_parameters[index]["vb"] = rbm.visible_bias
+            if (index == len(self.layers)-1):
+                if (self.gaussian_top):
+                    self.top_parameters["W"] = rbm.top_weights
+                    self.top_parameters["hb"] = rbm.top_bias
+                    self.top_parameters["vb"] = rbm.hidden_bias
 
             print("Finished Training Layer", index, "to", index+1)
             training_loss = self.calc_training_loss(dataloader, index+1)
@@ -140,8 +180,10 @@ class DBN:
             print("Time taken for training DBN layer", index, "to", index+1, "is", end_time-start_time, "seconds")
 
         if (self.savefile is not None):
-            model = self.initialize_model()
-            torch.save(model, self.savefile)
+            model = self.initialize_nn_model()
+            nn_savefile = self.savefile.replace(".pth", "_nn.pth")
+            torch.save(model, nn_savefile)
+            self.save_model()
         
         self.visualize_training_curve()
 
@@ -171,7 +213,7 @@ class DBN:
             train_loss += torch.mean(torch.abs(v_original - v_reconstruct))
         return train_loss.item()
 
-    def reconstructor(self, x: torch.Tensor, depth: int = -1) -> torch.Tensor:
+    def reconstructor(self, x: torch.Tensor, y: torch.Tensor, depth: int = -1) -> torch.Tensor:
         """
         Reconstruct input
         """
@@ -183,7 +225,11 @@ class DBN:
         for _ in range(self.k):
             x_dash = x.clone()
             for i in range(depth):
-                _, x_dash = self.sample_h(i, x_dash)
+                if (depth == len(self.layers)-1 and self.gaussian_top):
+                    top_down_sample = True
+                    _, x_dash = self.sample_h(i, x_dash, y, top_down_sample)
+                else:
+                    _, x_dash = self.sample_h(i, x_dash, y)
             x_gen.append(x_dash)
         x_dash = torch.stack(x_gen)
         x_dash = torch.mean(x_dash, dim=0)
@@ -209,7 +255,7 @@ class DBN:
         latent_vars = []
         data_labels = []
         for batch, label in dataloader:
-            visible, latent = self.reconstructor(batch, depth)
+            visible, latent = self.reconstructor(batch, label, depth)
             visible_data.append(visible)
             latent_vars.append(latent)
             data_labels.append(label)
@@ -219,7 +265,7 @@ class DBN:
         dataset = TensorDataset(visible_data, latent_vars, data_labels)
         return DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
             
-    def initialize_model(self):
+    def initialize_nn_model(self):
         """
         Initialize model
         """
@@ -239,9 +285,24 @@ class DBN:
             if (layer_no%2 == 0):
                 model[layer_no].weight = torch.nn.Parameter(self.layer_parameters[layer_no//2]["W"])
                 if (self.bias):
-                    model[layer_no].bias = torch.nn.Parameter(self.layer_parameters[layer_no//2]["hb"])
+                    model[layer_no].bias = torch.nn.Parameter(self.layer_parameters[layer_no//2]["vb"])
         return model
     
+    def save_model(self):
+        """
+        Save model
+        """
+        model = {"W": [], "vb": [], "hb": [], "TW": [], "tb": []}
+        for index, layer in enumerate(self.layer_parameters):
+            model["W"].append(layer["W"])
+            if (self.bias):
+                model["vb"].append(layer["vb"])
+                model["hb"].append(layer["hb"])
+        if (self.gaussian_top):
+            model["TW"].append(self.top_parameters["W"])
+            model["tb"].append(self.top_parameters["hb"])
+        torch.save(model, self.savefile)
+
     def load_rbm(self, layer: int, savefile: str):
         """
         Load RBM
@@ -249,7 +310,16 @@ class DBN:
         model = torch.load(savefile)
         self.layer_parameters[layer]["W"] = model["W"].to(self.device)
         if (self.bias):
+            self.layer_parameters[layer]["vb"] = model["vb"].to(self.device)
             self.layer_parameters[layer]["hb"] = model["hb"].to(self.device)
+        if (layer == len(self.layers)-1 and self.gaussian_top):
+            if ("TW" in model.keys()):
+                self.top_parameters["W"] = model["TW"].to(self.device)
+                self.top_parameters["vb"] = model["hb"].to(self.device)
+                self.top_parameters["hb"] = model["tb"].to(self.device)
+            else:
+                raise ValueError("Trying to load Gaussian top layer from a RBM without Gaussian top layer")
+
 
 if __name__ == "__main__":
     mnist = MNIST()

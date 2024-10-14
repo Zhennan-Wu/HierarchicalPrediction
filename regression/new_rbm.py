@@ -16,7 +16,7 @@ class RBM:
     """
     Restricted Boltzmann Machine
     """
-    def __init__(self, num_visible: int, num_hidden: int, batch_size: int = 32, epochs: int = 5, savefile: str = None, bias: bool = False, lr: float = 0.001, mode: str = "bernoulli", multinomial_sample_size: int = 0, k: int = 3, optimizer: str = "adam", early_stopping_patient: int = 5, gaussian_top: bool = False, top_sigma: float = 1.0, sigma: float = 1.0, disc_alpah: float = 0.):
+    def __init__(self, num_visible: int, num_hidden: int, batch_size: int = 32, epochs: int = 5, savefile: str = None, bias: bool = False, lr: float = 0.001, mode: str = "bernoulli", multinomial_sample_size: int = 0, k: int = 3, optimizer: str = "adam", early_stopping_patient: int = 5, gaussian_top: bool = False, top_sigma: float = 1.0, sigma: float = 1.0, disc_alpha: float = 0.):
         """
         Initialize RBM
         """
@@ -43,20 +43,30 @@ class RBM:
         self.previous_loss_before_stagnation = 0
         self.progress = []
         self.gaussian_top = gaussian_top
-        self.top_sigma = top_sigma
-        self.sigma = sigma
-        self.disc_alpah = disc_alpah
+        self.top_sigma = top_sigma*torch.ones((1,), dtype = torch.float32)
+        self.sigma = sigma*torch.ones((num_visible,), dtype = torch.float32)
+        self.disc_alpha = disc_alpha
 
         if (torch.cuda.is_available()):
             self.device = torch.device("cuda")
         else:
             self.device = torch.device("cpu")
 
-        # Initialize weights
+        # Initialize weights (handle different mode and setting here by initialization)
         std = 4*np.sqrt(6./(self.num_visible + self.num_hidden))  
         self.weights = torch.normal(mean=0, std=std, size=(self.num_hidden, self.num_visible), device=self.device)
-        self.top_weights = torch.normal(mean=0, std=std, size=(1, self.num_hidden), device=self.device)
+        if (self.gaussian_top):
+            self.top_weights = torch.normal(mean=0, std=std, size=(1, self.num_hidden), device=self.device)
+        else:
+            self.top_weights = torch.zeros((1, self.num_hidden), dtype = torch.float32, device=self.device)
         if (self.bias):
+            self.hidden_bias = torch.randn(self.num_hidden, dtype = torch.float32, device=self.device)
+            self.visible_bias = torch.randn(self.num_visible, dtype = torch.float32, device=self.device)
+            if (self.gaussian_top):
+                self.top_bias = torch.randn(1, dtype = torch.float32, device=self.device)
+            else:
+                self.top_bias = torch.zeros(1, dtype = torch.float32, device=self.device)
+        else:
             self.hidden_bias = torch.zeros(self.num_hidden, dtype = torch.float32, device=self.device)
             self.top_bias = torch.zeros(1, dtype = torch.float32, device=self.device)
             self.visible_bias = torch.zeros(self.num_visible, dtype = torch.float32, device=self.device)
@@ -65,29 +75,7 @@ class RBM:
         """
         Sample hidden units given visible units
         """
-        if (self.gaussian_top):
-            if (self.bias):
-                if (self.mode == "gaussian"):
-                    activation = (torch.mm(x, self.weights.t()) + self.visible_bias)/self.sigma + torch.mm(r, self.top_weights)/self.top_sigma + self.top_bias/self.top_sigma
-                else:
-                    activation = torch.mm(x, self.weights.t()) + self.visible_bias + torch.mm(r, self.top_weights)/self.top_sigma + self.top_bias/self.top_sigma 
-            else:
-                if (self.mode == "gaussian"):
-                    activation = torch.mm(x, self.weights.t())/self.sigma + torch.mm(r, self.top_weights)/self.top_sigma
-                else:
-                    activation = torch.mm(x, self.weights.t()) + torch.mm(r, self.top_weights)/self.top_sigma
-        else:
-            if (self.bias):
-                if (self.mode == "gaussian"):
-                    activation = (torch.mm(x, self.weights.t()) + self.visible_bias)/self.sigma
-                else:
-                    activation = torch.mm(x, self.weights.t()) + self.visible_bias
-            else:
-                if (self.mode == "gaussian"):
-                    activation = torch.mm(x, self.weights.t())/self.sigma
-                else:
-                    activation = torch.mm(x, self.weights.t())
-
+        activation = (torch.mm(x, self.weights.t()) + self.visible_bias)/self.sigma + torch.mm(r, self.top_weights)/self.top_sigma + self.top_bias/self.top_sigma
         if (self.mode == "multinomial"):
             p_h_given_v = torch.nn.functional.softmax(activation, dim=1)
             indices = torch.multinomial(p_h_given_v, self.multinomial_sample_size, replacement=True)
@@ -102,38 +90,32 @@ class RBM:
         """
         Sample visible units given hidden units
         """
-        if (self.bias):
-            activation = torch.mm(y, self.weights) + self.hidden_bias
-        else:
-            activation = torch.mm(y, self.weights)
+        activation = torch.mm(y, self.weights) + self.hidden_bias
+
         if (self.mode == "gaussian"):
             mean = activation*self.sigma
-            dist = torch.distributions.normal.Normal(mean, self.sigma)
-            sample = dist.sample()
-            p_v_given_h = torch.exp(dist.log_prob(sample))
-            return p_v_given_h, sample.to(self.device)
+            gaussian_dist = torch.distributions.normal.Normal(mean, self.sigma)
+            variable = gaussian_dist.sample()
+            p_v_given_h = torch.exp(gaussian_dist.log_prob(variable))
         else:
             p_v_given_h = torch.sigmoid(activation)
-            return p_v_given_h, torch.bernoulli(p_v_given_h)
+            variable = torch.bernoulli(p_v_given_h)
+        return p_v_given_h, variable
     
     def sample_r(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Sample visible units given hidden units
         """
         if (self.gaussian_top):
-            if (self.bias):
-                mean = (torch.mm(x, self.r_weights.t()) + self.hidden_bias)*self.sigma
-            else:
-                mean = torch.mm(x, self.r_weights.t())*self.sigma
-            
-            dist = torch.distributions.normal.Normal(mean, self.sigma)
-            sample = dist.sample()
-            p_r_given_h = torch.exp(dist.log_prob(sample))
-            return p_r_given_h, sample.to(self.device)
+            mean = (torch.mm(x, self.r_weights.t()) + self.hidden_bias)*self.sigma
+            gaussian_dist = torch.distributions.normal.Normal(mean, self.sigma)
+            variable = gaussian_dist.sample()
+            p_r_given_h = torch.exp(gaussian_dist.log_prob(variable))
         else:
             # return the original input with probability 1
             p_r_given_h = torch.tensor([1.], device=self.device)
-            return p_r_given_h, x
+            variable = x
+            return p_r_given_h, variable
         
     def adam(self, g: torch.Tensor , epoch: int, index: int) -> torch.Tensor:
         """
@@ -150,37 +132,35 @@ class RBM:
         Update weights and biases
         """
         dW = (torch.mm(v0.t(), ph0) - torch.mm(vk.t(), phk)).t()
-        if (self.gaussian_top):
-            dW_top = (torch.mm(r0.t(), ph0) - torch.mm(rk.t(), phk)).t()
-        if (self.bias):
-            dV = torch.sum(v0 - vk, dim=0)
-            dH = torch.sum(ph0 - phk, dim=0)
-            if (self.gaussian_top):
-                dR = torch.sum(r0 - rk, dim=0)
+        dW_top = (torch.mm(r0.t(), ph0) - torch.mm(rk.t(), phk)).t()
+        dV = torch.sum(v0 - vk, dim=0)
+        dH = torch.sum(ph0 - phk, dim=0)
+        dR = torch.sum(r0 - rk, dim=0)
 
         if (self.optimizer == "adam"):
             dW = self.adam(dW, epoch, 0)
-            if (self.gaussian_top):
-                dW_top = self.adam(dW_top, epoch, 1)
-            if (self.bias):
-                dV = self.adam(dV, epoch, 2)
-                dH = self.adam(dH, epoch, 3)
-                dR = self.adam(dR, epoch, 4)
+            dW_top = self.adam(dW_top, epoch, 1)
+            dV = self.adam(dV, epoch, 2)
+            dH = self.adam(dH, epoch, 3)
+            dR = self.adam(dR, epoch, 4)
+
         if (discriminator):
-            self.weights += self.lr*dW*self.disc_alpah
+            self.weights += self.lr*dW*self.disc_alpha
         else:
             self.weights += self.lr*dW
+
         if (self.gaussian_top):
             if (discriminator):
-                self.top_weights += self.lr*dW_top*self.disc_alpah
+                self.top_weights += self.lr*dW_top*self.disc_alpha
             else:
                 self.top_weights += self.lr*dW_top
+                
         if (self.bias):
             if (discriminator):
-                self.hidden_bias += self.lr*dH*self.disc_alpah
-                self.visible_bias += self.lr*dV*self.disc_alpah
+                self.hidden_bias += self.lr*dH*self.disc_alpha
+                self.visible_bias += self.lr*dV*self.disc_alpha
                 if (self.gaussian_top):
-                    self.top_bias += self.lr*dR*self.disc_alpah
+                    self.top_bias += self.lr*dR*self.disc_alpha
             else:
                 self.hidden_bias += self.lr*dH
                 self.visible_bias += self.lr*dV
@@ -247,16 +227,7 @@ class RBM:
             print("Time taken for RBM epoch {} is {:.2f} sec".format(epoch+1, end_time-start_time))
         learning.close()
         if (self.savefile != None):
-            if (self.bias):
-                if (self.gaussian_top):
-                    model = {"W": self.weights, "TW": self.top_weights, "hb": self.hidden_bias, "vb": self.visible_bias, "tb": self.top_bias}
-                else:
-                    model = {"W": self.weights, "hb": self.hidden_bias, "vb": self.visible_bias}
-            else:
-                if (self.gaussian_top):
-                    model = {"W": self.weights, "TW": self.top_weights}
-                else:
-                    model = {"W": self.weights}
+            model = {"W": self.weights, "TW": self.top_weights, "hb": self.hidden_bias, "vb": self.visible_bias, "tb": self.top_bias}
             torch.save(model, self.savefile)
         self.visualize_training_curve()
 
@@ -266,13 +237,10 @@ class RBM:
         """
         model = torch.load(savefile)
         self.weights = model["W"].to(self.device)
-        if (self.gaussian_top):
-            self.top_weights = model["TW"].to(self.device)
-        if (self.bias):
-            self.hidden_bias = model["hb"].to(self.device)
-            self.visible_bias = model["vb"].to(self.device)
-            if (self.gaussian_top):
-                self.top_bias = model["tb"].to(self.device)
+        self.top_weights = model["TW"].to(self.device)
+        self.hidden_bias = model["hb"].to(self.device)
+        self.visible_bias = model["vb"].to(self.device)
+        self.top_bias = model["tb"].to(self.device)
     
     def visualize_training_curve(self):
         """
