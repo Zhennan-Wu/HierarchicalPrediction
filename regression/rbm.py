@@ -16,7 +16,7 @@ class RBM:
     """
     Restricted Boltzmann Machine
     """
-    def __init__(self, num_visible: int, num_hidden: int, batch_size: int = 32, epochs: int = 5, savefile: str = None, bias: bool = False, lr: float = 0.001, mode: str = "bernoulli", multinomial_sample_size: int = 0, k: int = 3, optimizer: str = "adam", early_stopping_patient: int = 5, gaussian_top: bool = False, top_sigma: float = 1.0, sigma: float = 1.0, disc_alpha: float = 0.):
+    def __init__(self, num_visible: int, num_hidden: int, batch_size: int = 32, epochs: int = 5, savefile: str = None, bias: bool = False, lr: float = 0.001, mode: str = "bernoulli", multinomial_sample_size: int = 0, k: int = 3, optimizer: str = "adam", early_stopping_patient: int = 5, gaussian_top: bool = False, top_sigma: torch.Tensor = None, sigma: torch.Tensor = None, disc_alpha: float = 0.):
         """
         Initialize RBM
         """
@@ -24,6 +24,7 @@ class RBM:
             self.device = torch.device("cuda")
         else:
             self.device = torch.device("cpu")
+        # self.device = torch.device("cpu")
         self.mode = mode
         self.multinomial_sample_size = multinomial_sample_size
         self.bias = bias
@@ -47,8 +48,14 @@ class RBM:
         self.previous_loss_before_stagnation = 0
         self.progress = []
         self.gaussian_top = gaussian_top
-        self.top_sigma = top_sigma*torch.ones((1,), dtype = torch.float32, device=self.device)
-        self.sigma = sigma*torch.ones((num_visible,), dtype = torch.float32, device=self.device)
+        if  (top_sigma == None):
+            self.top_sigma = torch.ones((1,), dtype = torch.float32, device=self.device)
+        else:
+            self.top_sigma = top_sigma.to(torch.float32).to(self.device)
+        if (sigma == None):
+            self.sigma = torch.ones((num_visible,), dtype = torch.float32, device=self.device)
+        else:
+            self.sigma = sigma.to(torch.float32).to(self.device)
         self.disc_alpha = disc_alpha
 
         # Initialize weights (handle different mode and setting here by initialization)
@@ -74,7 +81,7 @@ class RBM:
         """
         Sample hidden units given visible units
         """
-        activation = (torch.mm(x, self.weights.t()) + self.visible_bias)/self.sigma + torch.mm(r, self.top_weights)/self.top_sigma + self.top_bias/self.top_sigma
+        activation = torch.mm(x/self.sigma, self.weights.t()) + self.hidden_bias + torch.mm(r/self.top_sigma, self.top_weights) + self.hidden_bias
         if (self.mode == "multinomial"):
             p_h_given_v = torch.nn.functional.softmax(activation, dim=1)
             indices = torch.multinomial(p_h_given_v, self.multinomial_sample_size, replacement=True)
@@ -89,7 +96,7 @@ class RBM:
         """
         Sample visible units given hidden units
         """
-        activation = torch.mm(y, self.weights) + self.hidden_bias
+        activation = torch.mm(y, self.weights) + self.visible_bias
         if (self.mode == "gaussian"):
             mean = activation*self.sigma
             gaussian_dist = torch.distributions.normal.Normal(mean, self.sigma)
@@ -105,15 +112,14 @@ class RBM:
         Sample visible units given hidden units
         """
         if (self.gaussian_top):
-            mean = (torch.mm(x, self.r_weights.t()) + self.hidden_bias)*self.sigma
-            gaussian_dist = torch.distributions.normal.Normal(mean, self.sigma)
+            mean = (torch.mm(x, self.top_weights.t()) + self.top_bias)*self.top_sigma
+            gaussian_dist = torch.distributions.normal.Normal(mean, self.top_sigma)
             variable = gaussian_dist.sample()
             p_r_given_h = torch.exp(gaussian_dist.log_prob(variable))
         else:
-            # return the original input with probability 1
-            p_r_given_h = torch.tensor([1.], device=self.device)
-            variable = x
-            return p_r_given_h, variable
+            p_r_given_h = torch.ones((self.batch_size, 1), dtype=torch.float32, device=self.device)
+            variable = torch.ones((self.batch_size, 1), dtype=torch.float32, device=self.device)
+        return p_r_given_h, variable
         
     def adam(self, g: torch.Tensor , epoch: int, index: int) -> torch.Tensor:
         """
@@ -130,7 +136,7 @@ class RBM:
         Update weights and biases
         """
         dW = (torch.mm(v0.t(), ph0) - torch.mm(vk.t(), phk)).t()
-        dW_top = (torch.mm(r0.t(), ph0) - torch.mm(rk.t(), phk)).t()
+        dW_top = (torch.mm(ph0.t(), r0) - torch.mm(phk.t(), rk)).t()
         dV = torch.sum(v0 - vk, dim=0)
         dH = torch.sum(ph0 - phk, dim=0)
         dR = torch.sum(r0 - rk, dim=0)
@@ -178,8 +184,8 @@ class RBM:
                 # Discriminator part
                 disc_vk = batch_data.to(self.device)
                 disc_v0 = batch_data.to(self.device)
-                disc_rk = label.unsqueeze(1).to(self.device)
-                disc_r0 = label.unsqueeze(1).to(self.device)
+                disc_rk = label.unsqueeze(1).to(torch.float).to(self.device)
+                disc_r0 = label.unsqueeze(1).to(torch.float).to(self.device)
                 
                 disc_ph0, _ = self.sample_h(disc_v0, disc_r0)
 
@@ -191,8 +197,8 @@ class RBM:
                 # Generation part
                 vk = batch_data.to(self.device)
                 v0 = batch_data.to(self.device)
-                rk = label.unsqueeze(1).to(self.device)
-                r0 = label.unsqueeze(1).to(self.device)
+                rk = label.unsqueeze(1).to(torch.float).to(self.device)
+                r0 = label.unsqueeze(1).to(torch.float).to(self.device)
                 
                 ph0, _ = self.sample_h(v0, r0)
 
@@ -233,7 +239,7 @@ class RBM:
         """
         Load RBM
         """
-        model = torch.load(savefile)
+        model = torch.load(savefile, weights_only=False)
         self.weights = model["W"].to(self.device)
         self.top_weights = model["TW"].to(self.device)
         self.hidden_bias = model["hb"].to(self.device)
@@ -244,7 +250,7 @@ class RBM:
         """
         Visualize training curve
         """
-        plot_title = "Training Curve of {}".format(self.savefile)
+        plot_title = "Training Curve of {}".format(self.savefile.replace(".pth", ""))
         directory = "../results/plots/RBM/"
         if not os.path.exists(directory):
             os.makedirs(directory)
@@ -261,7 +267,6 @@ if __name__ == "__main__":
     mnist = MNIST()
     train_x, train_y, test_x, test_y = mnist.load_dataset()
     print('MAE for all 0 selection:', torch.mean(train_x))
-
     batch_size = 1000	
     datasize = train_x.shape[0]
     data_dimension = train_x.shape[1]
@@ -270,6 +275,6 @@ if __name__ == "__main__":
     dataset = TensorDataset(train_x, train_y)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     
-    rbm = RBM(data_dimension, num_hidden=500, batch_size=batch_size, epochs=10, savefile="rbm.pth", bias = False, lr = 0.001, mode = "bernoulli", multinomial_sample_size = 10, k = 3, optimizer = "adam", early_stopping_patient = 5, gaussian_top = True, top_sigma = 3.0, sigma = 1.0, disc_alpha = 0.5)
+    rbm = RBM(data_dimension, num_hidden=500, batch_size=batch_size, epochs=10, savefile="rbm.pth", bias = False, lr = 0.001, mode = "bernoulli", multinomial_sample_size = 10, k = 3, optimizer = "adam", early_stopping_patient = 5, gaussian_top = True, top_sigma = 3.*torch.ones((1,)), sigma = None, disc_alpha = 0.5)
     rbm.train(data_loader)
     rbm.visualize_training_curve()

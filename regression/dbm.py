@@ -20,12 +20,12 @@ class DBM:
     """
     Deep Boltzmann Machine
     """
-    def __init__(self, input_size: int, layers: list, batch_size: int, epochs: int = 100, savefile: str = None, mode: str = "bernoulli", multinomial_top: bool=False, multinomial_sample_size: int = 0, bias: bool = False, k: int = 5, early_stopping_patient: int = 20, gaussian_top: bool = False, top_sigma: float = 1.0, sigma: float = 1.0, disc_alpha: float = 0.):
+    def __init__(self, input_size: int, layers: list, batch_size: int, epochs: int = 100, savefile: str = None, mode: str = "bernoulli", multinomial_top: bool=False, multinomial_sample_size: int = 0, bias: bool = False, k: int = 5, early_stopping_patient: int = 20, gaussian_top: bool = False, top_sigma: torch.Tensor = None, sigma: torch.Tensor = None, disc_alpha: float = 0.):
         if (torch.cuda.is_available()):
             self.device = torch.device("cuda")
         else:
             self.device = torch.device("cpu")
-
+        self.device = torch.device("cpu")
         self.input_size = input_size
         self.layers = layers
         self.bias = bias
@@ -39,8 +39,14 @@ class DBM:
         self.epochs = epochs
         self.multinomial_top = multinomial_top
         self.gaussian_top = gaussian_top
-        self.top_sigma = top_sigma*torch.ones((1.,), device=self.device)
-        self.sigma = sigma*torch.ones((input_size,), device=self.device)
+        if (top_sigma == None):
+            self.top_sigma = torch.ones((1,), dtype = torch.float32, device=self.device)
+        else:
+            self.top_sigma = top_sigma.to(torch.float32).to(self.device)
+        if (sigma == None):
+            self.sigma = torch.ones((input_size,), dtype = torch.float32, device=self.device)
+        else:
+            self.sigma = sigma.to(torch.float32).to(self.device)
         self.disc_alpha = disc_alpha
         self.multinomial_sample_size = multinomial_sample_size
         self.early_stopping_patient = early_stopping_patient
@@ -54,8 +60,8 @@ class DBM:
         Sample visible units given hidden units
         """
         W = self.layer_parameters[layer_index]["W"]
-        hb = self.layer_parameters[layer_index]["hb"]
-        activation = torch.matmul(y, W) + hb
+        vb = self.layer_parameters[layer_index]["vb"]
+        activation = torch.matmul(y, W) + vb
         if (self.mode == "bernoulli"):
             p_v_given_h = torch.sigmoid(activation) 
             variable = torch.bernoulli(p_v_given_h)    
@@ -76,19 +82,19 @@ class DBM:
         b_bottom = self.layer_parameters[layer_index]["hb"]
         if (layer_index == len(self.layers)-1):
             W_top = self.top_parameters["W"]
-            b_top = self.top_parameters["hb"]
+            b_top = self.top_parameters["vb"]
         else:
             W_top = self.layer_parameters[layer_index+1]["W"]
-            b_top = self.layer_parameters[layer_index+1]["hb"]
+            b_top = self.layer_parameters[layer_index+1]["vb"]
         if (x_top is not None):
             x_top = x_top.to(self.device)
         else:
-            x_top = torch.zeros((W_top.size(0),), device=self.device)
+            x_top = torch.zeros((1, W_top.size(0)), device=self.device)
 
         if (layer_index == 0):
-            activation = (torch.matmul(x_bottom, W_bottom.t()) + b_bottom)/self.sigma + torch.matmul(x_top, W_top) + b_top
+            activation = torch.matmul(x_bottom/self.sigma, W_bottom.t()) + b_bottom + torch.matmul(x_top, W_top) + b_top
         elif (layer_index == len(self.layers)-1):
-            activation = torch.matmul(x_bottom, W_bottom.t()) + (torch.matmul(x_top, W_top) + b_bottom + b_top)/self.top_sigma
+            activation = torch.matmul(x_bottom, W_bottom.t()) + torch.matmul(x_top/self.top_sigma, W_top) + b_bottom + b_top
         else:
             activation = torch.matmul(x_bottom, W_bottom.t()) + torch.matmul(x_top, W_top) + b_bottom + b_top
 
@@ -107,13 +113,13 @@ class DBM:
         Sample reconstruction
         """
         if (self.gaussian_top):
-            mean = (torch.mm(x_bottom, self.top_parameters["W"].t()) + self.top_parameters["vb"])*self.top_sigma
+            mean = (torch.mm(x_bottom, self.top_parameters["W"].t()) + self.top_parameters["hb"])*self.top_sigma
             gaussian_dist = torch.distributions.normal.Normal(mean, self.sigma)
             variable = gaussian_dist.sample()
             p_r_given_h = torch.exp(gaussian_dist.log_prob(variable))
         else:
-            p_r_given_h = torch.tensor([1.], device=self.device)
-            variable = x_bottom
+            p_r_given_h = torch.ones((self.batch_size, 1), dtype=torch.float32, device=self.device)
+            variable = torch.ones((self.batch_size, 1), dtype=torch.float32, device=self.device)
         return p_r_given_h, variable
         
     def generate_input_for_layer(self, index: int, dataset: torch.Tensor) -> torch.Tensor:
@@ -194,9 +200,9 @@ class DBM:
         """
         Load DBN or DBM model
         """
-        model = torch.load(savefile)
+        model = torch.load(savefile, weights_only=False)
         layer_parameters = []
-        for index in range(len(model)):
+        for index in range(len(model["W"])):
             layer_parameters.append({"W":model["W"][index].to(self.device), "hb":model["hb"][index].to(self.device), "vb":model["vb"][index].to(self.device)})
         
         top_parameters = {"W":model["TW"][0].to(self.device), "hb":model["tb"][0].to(self.device), "vb":layer_parameters[-1]["hb"].to(self.device)}
@@ -261,7 +267,7 @@ class DBM:
         Gibbs update dataloader
         """
         # Update samples (subsample a subset of Markov Chains is excluded, it might need be added later for better performance)
-        new_mcmc = [[] for _ in range(len(self.layers)+1)]
+        new_mcmc = [[] for _ in range(len(self.layers)+2)]
         if (discriminator):
             for variables in dataloader:
                 pre_updated_variables = variables
@@ -383,7 +389,7 @@ class DBM:
         plt.savefig(directory + plot_title.replace(" ", "_") + ".png")
         plt.close()
 
-    def train(self, dataloader: DataLoader, gibbs_iterations: int=3, mf_maximum_steps: int=100, mf_threshold: float=0.01, convergence_consecutive_hits: int=3):
+    def train(self, dataloader: DataLoader, gibbs_iterations: int=3, mf_maximum_steps: int=100, mf_threshold: float=0.1, convergence_consecutive_hits: int=3):
         """
         Train DBM
         """
@@ -394,7 +400,7 @@ class DBM:
                 if (index == 0):
                     variables[index].append(data)
                 elif (index == len(self.layers)+1):
-                    variables[index].append(label)
+                    variables[index].append(label.to(torch.float32).unsqueeze(1))
                 else:
                     variables[index].append(self.generate_input_for_layer(index, data))
         
@@ -418,7 +424,7 @@ class DBM:
                 dataset_index = 0
                 for dataset, mcmc_samples, disc_samples in zip(dataloader, mcmc_loader, disc_loader):
                     elbos = []
-                    label = dataset[1].to(self.device)
+                    label = dataset[1].unsqueeze(1).to(torch.float32).to(self.device)
                     dataset = dataset[0].to(self.device)
                     mcmc_samples = [sample.to(self.device) for sample in mcmc_samples]
                     disc_samples = [sample.to(self.device) for sample in disc_samples]
@@ -428,21 +434,16 @@ class DBM:
 
                     mf_step = 0
                     mf_convergence_count = [0]*len(self.layers)
-                    mf_difference = []
+                    mf_difference = {k: [] for k in range(len(self.layers))}
                     while (mf_step < mf_maximum_steps):
-                        mf_difference = []
                         for index, _ in enumerate(self.layers):
                             old_mu = self.layer_mean_field_parameters[index]["mu"]
                             if (index == len(self.layers)-1):
-                                if (self.gaussian_top):
-                                    activation = torch.matmul(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"].t()) + torch.matmul(label, self.top_parameters["W"])/self.top_sigma
-                                else:
-                                    activation = torch.matmul(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"].t())
+                                activation = torch.matmul(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"].t()) + torch.matmul(label/self.top_sigma, self.top_parameters["W"])
+
                             elif (index == 0):
-                                if (self.mode == "gaussian"):
-                                    activation = torch.matmul(dataset, self.layer_parameters[index]["W"].t())/self.sigma + torch.matmul(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"])
-                                else:
-                                    activation = torch.matmul(dataset, self.layer_parameters[index]["W"].t()) + torch.matmul(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"])
+                                activation = torch.matmul(dataset/self.sigma, self.layer_parameters[index]["W"].t())+ torch.matmul(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"])
+
                             else:
                                 activation = torch.matmul(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"].t()) + torch.matmul(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"])
 
@@ -452,7 +453,7 @@ class DBM:
                                 raise ValueError("Negative Mean Field Parameters")
 
                             new_diff = torch.max(torch.abs(old_mu - self.layer_mean_field_parameters[index]["mu"])).item()
-                            mf_difference.append(new_diff)
+                            mf_difference[index].append(new_diff)
                             if (new_diff < mf_threshold):
                                 mf_convergence_count[index] += 1
                             else:
@@ -466,21 +467,34 @@ class DBM:
                     if (mf_step == mf_maximum_steps):
                         torch.set_printoptions(precision=2)
                         print("For episode {} dataset {}, Mean Field did not converge with layerwise difference {}".format(epoch, dataset_index, mf_difference))
+                        directory = "../results/plots/DBM/MF_Differences/dataset_{}/".format(dataset_index)
+                        if not os.path.exists(directory):
+                            os.makedirs(directory)
+                        plt.title("Mean Field Difference for dataset {} at epoch {}".format(dataset_index, epoch))
+                        plt.plot(mf_difference[0], label="Layer 1")
+                        plt.plot(mf_difference[1], label="Layer 2")
+                        plt.plot(mf_difference[2], label="Layer 3")
+                        plt.xlabel("MF Iterations")
+                        plt.legend()
+                        plt.show()
+                        plt.savefig(directory+"epoch_{}.png".format(epoch))
+                        plt.close()
+
                     self.visualize_ELBO(dataset_index, epoch, elbos)
 
                     # Update model parameters
                     for index, _ in enumerate(self.layers):
                         if (index == 0):
-                            generation_loss = (torch.matmul(self.layer_mean_field_parameters[index]["mu"].t(), dataset)/self.batch_size - torch.matmul(mcmc_samples[index+1].t(), mcmc_samples[index])/self.batch_size)/self.sigma
-                            discrimination_loss = (torch.matmul(self.layer_mean_field_parameters[index]["mu"].t(), dataset)/self.batch_size - torch.matmul(disc_samples[index+1].t(), disc_samples[index])/self.batch_size)/self.sigma
+                            generation_loss = torch.matmul(self.layer_mean_field_parameters[index]["mu"].t(), dataset/self.sigma)/self.batch_size - torch.matmul(mcmc_samples[index+1].t(), mcmc_samples[index]/self.sigma)/self.batch_size
+                            discrimination_loss = torch.matmul(self.layer_mean_field_parameters[index]["mu"].t(), dataset/self.sigma)/self.batch_size - torch.matmul(disc_samples[index+1].t(), disc_samples[index]/self.sigma)/self.batch_size
                             self.layer_parameters[index]["W"] = self.layer_parameters[index]["W"] + alpha * (generation_loss + self.disc_alpha * discrimination_loss)
                             if (self.bias):
                                 generation_loss = (torch.sum(self.layer_mean_field_parameters[index]["mu"] - mcmc_samples[index+1], dim=0)/self.batch_size)
                                 discrimination_loss = (torch.sum(self.layer_mean_field_parameters[index]["mu"] - disc_samples[index+1], dim=0)/self.batch_size)
                                 self.layer_parameters[index]["hb"] = self.layer_parameters[index]["hb"] + alpha * (generation_loss + self.disc_alpha * discrimination_loss)
 
-                                generation_loss = (torch.sum(dataset - mcmc_samples[index], dim=0)/self.batch_size)/self.sigma
-                                discrimination_loss = (torch.sum(dataset - disc_samples[index], dim=0)/self.batch_size)/self.sigma
+                                generation_loss = torch.sum(dataset/self.sigma - mcmc_samples[index]/self.sigma, dim=0)/self.batch_size
+                                discrimination_loss = torch.sum(dataset/self.sigma - disc_samples[index]/self.sigma, dim=0)/self.batch_size
                                 self.layer_parameters[index]["vb"] = self.layer_parameters[index]["vb"] + alpha * (generation_loss + self.disc_alpha * discrimination_loss)
                         else:
                             generation_loss = torch.matmul(self.layer_mean_field_parameters[index]["mu"].t(), self.layer_mean_field_parameters[index-1]["mu"])/self.batch_size - torch.matmul(mcmc_samples[index+1].t(), mcmc_samples[index])/self.batch_size
@@ -493,18 +507,18 @@ class DBM:
 
                                 self.layer_parameters[index]["vb"] = self.layer_parameters[index-1]["hb"]
                     if (self.gaussian_top):
-                        generation_loss = (torch.matmul(self.layer_mean_field_parameters[-1]["mu"].t(), label)/self.batch_size - torch.matmul(mcmc_samples[-1].t(), mcmc_samples[-2])/self.batch_size)/self.top_sigma
-                        discrimination_loss = (torch.matmul(self.layer_mean_field_parameters[-1]["mu"].t(), label)/self.batch_size - torch.matmul(disc_samples[-1].t(), disc_samples[-2])/self.batch_size)/self.top_sigma
+                        generation_loss = torch.matmul(label.t()/self.top_sigma, self.layer_mean_field_parameters[-1]["mu"])/self.batch_size - torch.matmul(mcmc_samples[-1].t()/self.top_sigma, mcmc_samples[-2])/self.batch_size
+                        discrimination_loss = torch.matmul(label.t()/self.top_sigma, self.layer_mean_field_parameters[-1]["mu"])/self.batch_size - torch.matmul(disc_samples[-1].t()/self.top_sigma, disc_samples[-2])/self.batch_size
                         self.top_parameters["W"] = self.top_parameters["W"] + alpha * (generation_loss + self.disc_alpha * discrimination_loss)
                         if (self.bias):
-                            generation_loss = (torch.sum(self.layer_mean_field_parameters[-1]["mu"] - mcmc_samples[-1], dim=0)/self.batch_size)
-                            discrimination_loss = (torch.sum(self.layer_mean_field_parameters[-1]["mu"] - disc_samples[-1], dim=0)/self.batch_size)
+                            generation_loss = torch.sum(label/self.top_sigma - mcmc_samples[-1]/self.top_sigma, dim=0)/self.batch_size
+                            discrimination_loss = torch.sum(label/self.top_sigma - disc_samples[-1]/self.top_sigma, dim=0)/self.batch_size
                             self.top_parameters["hb"] = self.top_parameters["hb"] + alpha * (generation_loss + self.disc_alpha * discrimination_loss)
 
                             self.top_parameters["vb"] = self.layer_parameters[-1]["hb"]
 
-                    reconstructed_data, _ = self.reconstructor(dataset, gibbs_iterations)
-                    train_loss += torch.mean(torch.abs(dataset - reconstructed_data.to(self.device)))
+                    reconstructed_data, _, reconstrcted_label = self.reconstructor(dataset, label, gibbs_iterations)
+                    train_loss += torch.mean(torch.abs(dataset - reconstructed_data.to(self.device))) + torch.mean(torch.abs(label - reconstrcted_label.to(self.device)))
                     counter += 1
 
                 self.progress.append(train_loss.item()/counter)
@@ -512,15 +526,15 @@ class DBM:
                 learning.set_description(str(details))
                 learning.refresh()    
 
-                # if (train_loss.item()/counter > self.previous_loss_before_stagnation and epoch>self.early_stopping_patient+1):
-                #     self.stagnation += 1
-                #     if (self.stagnation == self.early_stopping_patient-1):
-                #         learning.close()
-                #         print("Not Improving the stopping training loop.")
-                #         break
-                # else:
-                #     self.previous_loss_before_stagnation = train_loss.item()/counter
-                #     self.stagnation = 0
+                if (train_loss.item()/counter > self.previous_loss_before_stagnation and epoch>self.early_stopping_patient+1):
+                    self.stagnation += 1
+                    if (self.stagnation == self.early_stopping_patient-1):
+                        learning.close()
+                        print("Not Improving the stopping training loop.")
+                        break
+                else:
+                    self.previous_loss_before_stagnation = train_loss.item()/counter
+                    self.stagnation = 0
                 
                 end_time = time.time()
                 print("Time taken for DBM epoch {} is {}".format(epoch, end_time-start_time))
@@ -534,29 +548,37 @@ class DBM:
         self.visualize_training_curve()
 
         if (self.savefile != None):
-            model = self.initialize_model()
-            torch.save(model, self.savefile)        
+            model = self.initialize_nn_model()
+            savefile = self.savefile.replace(".pth", "_nn.pth")
+            torch.save(model, savefile)     
+            self.save_model()   
 
-    def reconstructor(self, x: torch.Tensor, y: torch.Tensor, repeat: int = 1, depth: int = -1) -> torch.Tensor:
+    def reconstructor(self, x: torch.Tensor, label: torch.Tensor, repeat: int = 1, depth: int = -1) -> torch.Tensor:
         """
         Reconstruct input
         """
         if (depth == -1):
             depth = len(self.layers)
         
-        x = x.to(self.device)
         for _ in range(repeat):
             x_gen = []
+            r_gen = []
             for _ in range(self.k):
                 x_dash = x.clone()
                 for i in range(depth):
                     if (i == len(self.layers)-1):
-                        _, x_dash = self.sample_h(i, x_dash, y)
+                        _, r_dash = self.sample_h(i, x_dash)
+                        _, r_dash = self.sample_r(r_dash)
+                        r_gen.append(r_dash)
+                        _, x_dash = self.sample_h(i, x_dash, label)
                     else:
                         _, x_dash = self.sample_h(i, x_dash)
+
                 x_gen.append(x_dash)
             x_dash = torch.stack(x_gen)
             x_dash = torch.mean(x_dash, dim=0)
+            r_dash = torch.stack(r_gen)
+            r_dash = torch.mean(r_dash, dim=0)
 
             y = x_dash
 
@@ -570,7 +592,7 @@ class DBM:
             y_dash = torch.mean(y_dash, dim=0)
             x = y_dash
 
-        return y_dash, x_dash
+        return y_dash, x_dash, r_dash
 
     def reconstruct(self, dataloader: DataLoader, repeat: int = 1, depth: int = -1) -> DataLoader:
         """
@@ -579,15 +601,20 @@ class DBM:
         visible_data = []
         latent_vars = []
         data_labels = []
+        pseudo_labels = []
         for batch, label in dataloader:
-            visible, latent = self.reconstructor(batch, label, repeat, depth)
+            batch = batch.to(self.device)
+            label = label.unsqueeze(1).to(torch.float32).to(self.device)
+            visible, latent, pseudo_labels = self.reconstructor(batch, label, repeat, depth)
             visible_data.append(visible)
             latent_vars.append(latent)
             data_labels.append(label)
+            pseudo_labels.append(pseudo_labels)
         visible_data = torch.cat(visible_data, dim=0)
         latent_vars = torch.cat(latent_vars, dim=0)
         data_labels = torch.cat(data_labels, dim=0)
-        dataset = TensorDataset(visible_data, latent_vars, data_labels)
+        pseudo_labels = torch.cat(pseudo_labels, dim=0)
+        dataset = TensorDataset(visible_data, latent_vars, data_labels, pseudo_labels)
         return DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
    
     def encoder(self, dataset: torch.Tensor, label: torch.Tensor, repeat: int) -> torch.Tensor:
@@ -660,6 +687,8 @@ class DBM:
         latent_vars = []
         labels = []
         for data, label in dataloader:
+            data = data.to(self.device)
+            label = label.unsqueeze(1).to(torch.float32).to(self.device)
             latent_vars.append(self.encoder(data, label, repeat))
             labels.append(label)
         latent_vars = torch.cat(latent_vars, dim=0)
@@ -697,17 +726,16 @@ if __name__ == "__main__":
     print('MAE for all 0 selection:', torch.mean(train_x))
 
     batch_size = 1000	
-
-    # train_x = train_x[:batch_size*3, :]
-    # train_y = train_y[:batch_size*3]    
-
     datasize = train_x.shape[0]
     data_dimension = train_x.shape[1]
-    print(datasize, data_dimension, batch_size)
+    print("The whole dataset has {} data. The dimension of each data is {}. Batch size is {}.".format(datasize, data_dimension, batch_size))
+
+    # train_x = train_x[:batch_size*3]
+    # train_y = train_y[:batch_size*3]    
 
     dataset = TensorDataset(train_x, train_y)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     
-    dbm = DBM(data_dimension, [1000, 500, 100], batch_size, epochs = 400, savefile="dbm.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10)
-    dbm.load_dbn("dbn.pth")
+    dbm = DBM(data_dimension, layers=[1000, 500, 100], batch_size=batch_size, epochs = 400, savefile="dbm.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 5, early_stopping_patient = 20, gaussian_top = False, top_sigma = 0.5*torch.ones((1,), dtype=torch.float32), sigma = None, disc_alpha = 0.5)
+    dbm.load_model("dbn.pth")
     dbm.train(data_loader)

@@ -16,12 +16,12 @@ class DBN:
     """
     Deep Boltzmann Machine
     """
-    def __init__(self, input_size: int, layers: list, batch_size: int, epoch: int = 10, savefile: str = None, mode: str = "bernoulli", multinomial_top: bool=False, multinomial_sample_size: int=0, bias: bool = False, k: int = 5, gaussian_top = False, top_sigma: float = 1, sigma: float = 1, disc_alpha: float = 0.):
+    def __init__(self, input_size: int, layers: list, batch_size: int, epochs: int = 10, savefile: str = None, mode: str = "bernoulli", multinomial_top: bool=False, multinomial_sample_size: int=0, bias: bool = False, k: int = 5, gaussian_top = False, top_sigma: torch.Tensor = None, sigma: torch.Tensor = None, disc_alpha: float = 0.):
         if (torch.cuda.is_available()):
             self.device = torch.device("cuda")
         else:
             self.device = torch.device("cpu")
-
+        # self.device = torch.device("cpu")
         self.input_size = input_size
         self.layers = layers
         self.bias = bias
@@ -30,10 +30,16 @@ class DBN:
         self.k = k
         self.mode = mode
         self.gaussian_top = gaussian_top
-        self.sigma = sigma*torch.ones((input_size,), dtype=torch.float32, device=self.device)
-        self.top_sigma = top_sigma*torch.ones((1,), dtype=torch.float32, device=self.device)
+        if (top_sigma is None):
+            self.top_sigma = torch.ones((1,), dtype=torch.float32, device=self.device)
+        else:
+            self.top_sigma = top_sigma.to(torch.float32).to(self.device)
+        if (sigma is None):
+            self.sigma = torch.ones((input_size,), dtype=torch.float32, device=self.device)
+        else:
+            self.sigma = sigma.to(torch.float32).to(self.device)
         self.savefile = savefile
-        self.epoch = epoch
+        self.epochs = epochs
         self.multinomial_top = multinomial_top
         self.multinomial_sample_size = multinomial_sample_size
         self.depthwise_training_loss = []
@@ -46,8 +52,8 @@ class DBN:
         Sample visible units given hidden units
         """
         W = self.layer_parameters[layer_index]["W"]
-        hb = self.layer_parameters[layer_index]["hb"]
-        activation = torch.matmul(y, W) + hb
+        vb = self.layer_parameters[layer_index]["vb"]
+        activation = torch.matmul(y, W) + vb
 
         if (self.mode == "bernoulli"):
             p_v_given_h = torch.sigmoid(activation)
@@ -65,17 +71,16 @@ class DBN:
         """
         Sample hidden units given visible units
         """
-        x_bottom = x_bottom
         W_bottom = self.layer_parameters[layer_index]["W"]
-        b_bottom = self.layer_parameters[layer_index]["vb"]
+        b_bottom = self.layer_parameters[layer_index]["hb"]
         if (layer_index == 0):
-            activation = (torch.matmul(x_bottom, W_bottom.t()) + b_bottom)/self.sigma
+            activation = torch.matmul(x_bottom/self.sigma, W_bottom.t()) + b_bottom
         else:    
             activation =torch.matmul(x_bottom, W_bottom.t()) + b_bottom 
 
         if (layer_index == len(self.layers)-1 and self.multinomial_top):
             if (top_down_sample):
-                activation = activation + (torch.matmul(label, self.top_parameters["W"]) + self.top_parameters["hb"])/self.top_sigma
+                activation = activation + torch.matmul(label/self.top_sigma, self.top_parameters["W"]) + self.top_parameters["vb"]
             p_h_given_v = torch.softmax(activation, dim=1)
             indices = torch.multinomial(p_h_given_v, self.multinomial_sample_size, replacement=True)
             one_hot = torch.zeros(p_h_given_v.size(0), self.multinomial_sample_size, p_h_given_v.size(1), device=self.device).scatter_(2, indices.unsqueeze(-1), 1)
@@ -90,13 +95,13 @@ class DBN:
         Sample reconstruction
         """
         if (self.gaussian_top):
-            mean = (torch.mm(x_bottom, self.top_parameters["W"].t()) + self.top_parameters["vb"])*self.sigma
+            mean = (torch.mm(x_bottom, self.top_parameters["W"].t()) + self.top_parameters["hb"])*self.top_sigma
             gaussian_dist = torch.distributions.normal.Normal(mean, self.sigma)
             variable = gaussian_dist.sample()
             p_r_given_h = torch.exp(gaussian_dist.log_prob(variable))
         else:
-            p_r_given_h = torch.tensor([1.], device=self.device)
-            variable = x_bottom
+            p_r_given_h = torch.ones((self.batch_size, 1), dtype=torch.float32, device=self.device)
+            variable = torch.ones((self.batch_size, 1), dtype=torch.float32, device=self.device)
         return p_r_given_h, variable
         
     def generate_input_for_layer(self, index: int, dataloader: DataLoader) -> DataLoader:
@@ -141,7 +146,10 @@ class DBN:
                     mode = "multinomial"
             else:
                 mode = self.mode
-            rbm = RBM(vn, hn, self.batch_size, epochs=self.epoch, savefile="{}th layer_rbm.pth".format(index+1), bias = False, lr=0.0005, mode = mode, multinomial_sample_size=self.multinomial_sample_size, k=10, optimizer="adam", early_stopping_patient=10, gaussian_top=self.gaussian_top, top_sigma=self.top_sigma, sigma=self.sigma, disc_alpha=self.disc_alpha)
+            if (index == 0):
+                rbm = RBM(vn, hn, self.batch_size, epochs=self.epochs, savefile="{}th layer_rbm.pth".format(index+1), bias = False, lr=0.0005, mode = mode, multinomial_sample_size=self.multinomial_sample_size, k=10, optimizer="adam", early_stopping_patient=10, gaussian_top=self.gaussian_top, top_sigma=self.top_sigma, sigma=self.sigma, disc_alpha=self.disc_alpha)
+            else:
+                rbm = RBM(vn, hn, self.batch_size, epochs=self.epochs, savefile="{}th layer_rbm.pth".format(index+1), bias = self.bias, lr=0.0005, mode = mode, multinomial_sample_size=self.multinomial_sample_size, k=10, optimizer="adam", early_stopping_patient=10, gaussian_top=self.gaussian_top, top_sigma=self.top_sigma, sigma=None, disc_alpha=self.disc_alpha)
 
             hidden_loader = self.generate_input_for_layer(index, dataloader)
 
@@ -188,9 +196,10 @@ class DBN:
         '''
         '''
         train_loss = torch.tensor([0.], device=self.device)
-        for batch_data, _ in dataloader:
+        for batch_data, label in dataloader:
             v_original = batch_data.to(self.device)
-            v_reconstruct, _ = self.reconstructor(v_original, depth)
+            label = label.unsqueeze(1).to(torch.float32).to(self.device)
+            v_reconstruct, _ = self.reconstructor(v_original, label, depth)
             train_loss += torch.mean(torch.abs(v_original - v_reconstruct))
         return train_loss.item()
 
@@ -200,13 +209,11 @@ class DBN:
         """
         if (depth == -1):
             depth = len(self.layers)
-        
-        x = x.to(self.device)
         x_gen = []
         for _ in range(self.k):
             x_dash = x.clone()
             for i in range(depth):
-                if (depth == len(self.layers)-1 and self.gaussian_top):
+                if (i == len(self.layers)-1 and self.gaussian_top):
                     top_down_sample = True
                     _, x_dash = self.sample_h(i, x_dash, y, top_down_sample)
                 else:
@@ -236,6 +243,8 @@ class DBN:
         latent_vars = []
         data_labels = []
         for batch, label in dataloader:
+            batch = batch.to(self.device)
+            label = label.unsqueeze(1).to(torch.float32).to(self.device)
             visible, latent = self.reconstructor(batch, label, depth)
             visible_data.append(visible)
             latent_vars.append(latent)
@@ -250,7 +259,7 @@ class DBN:
         """
         Load DBN or DBM model
         """
-        model = torch.load(savefile)
+        model = torch.load(savefile, weights_only=False)
         layer_parameters = []
         for index in range(len(model)):
             layer_parameters.append({"W":model["W"][index].to(self.device), "hb":model["hb"][index].to(self.device), "vb":model["vb"][index].to(self.device)})
@@ -329,18 +338,16 @@ if __name__ == "__main__":
     mnist = MNIST()
     train_x, train_y, test_x, test_y = mnist.load_dataset()
     print('MAE for all 0 selection:', torch.mean(train_x))
-
     batch_size = 1000	
-
-    # train_x = train_x[:batch_size*3, :]
-    # train_y = train_y[:batch_size*3]    
-
     datasize = train_x.shape[0]
     data_dimension = train_x.shape[1]
-    print(datasize, data_dimension, batch_size)
+    print("The whole dataset has {} data. The dimension of each data is {}. Batch size is {}.".format(datasize, data_dimension, batch_size))
 
-    dataset = TensorDataset(train_x, train_y)
-    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    # train_x = train_x[:3*batch_size]
+    # train_y = train_y[:3*batch_size]
     
-    dbn = DBN(data_dimension, [1000, 500, 100], batch_size, epoch = 400, savefile="dbn.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10)
+    dataset = TensorDataset(train_x, train_y)
+    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    
+    dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 400, savefile="dbn.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 5, gaussian_top = True, top_sigma = 0.5*torch.ones((1,)), sigma = None, disc_alpha = 0.5)
     dbn.train(data_loader)
