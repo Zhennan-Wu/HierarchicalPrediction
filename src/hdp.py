@@ -569,7 +569,6 @@ class HierarchicalDirichletProcess:
             for data, _ in dataloader:
                 batch_index += 1
                 self.gibbs_update(epoch, batch_index, number_of_iterations, data, test)
-            self.save_model("hdp_epoch{}.pth".format(epoch))
         if (not test):
             self.save_model("hdp.pth")
 
