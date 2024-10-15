@@ -1,13 +1,0 @@
-miniconda version 24.1.2 python3.11.7 unloaded.
-miniconda version 24.1.2 python3.11.7 loaded.
-Starting...:   0%|          | 0/400 [00:00<?, ?it/s]Starting...:   0%|          | 0/400 [18:34<?, ?it/s]
-Traceback (most recent call last):
-  File "/geode2/home/u110/zwu1/BigRed200/HierarchicalPrediction/src/./dbm.py", line 639, in <module>
-    dbm.train(data_loader)
-  File "/geode2/home/u110/zwu1/BigRed200/HierarchicalPrediction/src/./dbm.py", line 381, in train
-    elbos.append(self.calc_ELBO(dataset))
-  File "/geode2/home/u110/zwu1/BigRed200/HierarchicalPrediction/src/./dbm.py", line 267, in calc_ELBO
-    elbo += entropy
-RuntimeError: output with shape [] doesn't match the broadcast shape [1]
-srun: error: nid0641: task 0: Exited with exit code 1
-srun: Terminating StepId=3789287.0
