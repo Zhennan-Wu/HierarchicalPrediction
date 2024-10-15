@@ -1,0 +1,5 @@
+miniconda version 24.1.2 python3.11.7 unloaded.
+miniconda version 24.1.2 python3.11.7 loaded.
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+slurmstepd: error: *** STEP 3810834.0 ON nid0641 CANCELLED AT 2024-10-08T13:46:58 ***
+slurmstepd: error: *** JOB 3810834 ON nid0641 CANCELLED AT 2024-10-08T13:46:58 ***

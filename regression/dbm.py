@@ -476,7 +476,7 @@ class DBM:
                         plt.plot(mf_difference[2], label="Layer 3")
                         plt.xlabel("MF Iterations")
                         plt.legend()
-                        plt.show()
+                        #  plt.show()
                         plt.savefig(directory+"epoch_{}.png".format(epoch))
                         plt.close()
 
@@ -736,6 +736,6 @@ if __name__ == "__main__":
     dataset = TensorDataset(train_x, train_y)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     
-    dbm = DBM(data_dimension, layers=[1000, 500, 100], batch_size=batch_size, epochs = 400, savefile="dbm.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 5, early_stopping_patient = 20, gaussian_top = False, top_sigma = 0.5*torch.ones((1,), dtype=torch.float32), sigma = None, disc_alpha = 0.5)
+    dbm = DBM(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 400, savefile="dbm.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 5, early_stopping_patient = 20, gaussian_top = False, top_sigma = 0.5*torch.ones((1,), dtype=torch.float32), sigma = None, disc_alpha = 0.5)
     dbm.load_model("dbn.pth")
     dbm.train(data_loader)

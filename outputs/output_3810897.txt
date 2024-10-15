@@ -1,0 +1,5 @@
+MAE for all 0 selection: tensor(0.1307)
+60000 784 1000
+Loaded Layer 0
+Loaded Layer 1
+Loaded Layer 2
