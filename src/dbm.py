@@ -391,7 +391,7 @@ class DBM:
         plt.savefig(directory + plot_title.replace(" ", "_") + ".png")
         plt.close()
 
-    def train(self, dataloader: DataLoader, gibbs_iterations: int=3, mf_maximum_steps: int=300, mf_threshold: float=0.1, convergence_consecutive_hits: int=3):
+    def train(self, dataloader: DataLoader, gibbs_iterations: int=210, mf_maximum_steps: int=300, mf_threshold: float=0.1, convergence_consecutive_hits: int=3):
         """
         Train DBM
         """
@@ -520,7 +520,7 @@ class DBM:
 
                             self.top_parameters["vb"] = self.layer_parameters[-1]["hb"]
 
-                    reconstructed_data, _, reconstrcted_label = self.reconstructor(dataset, label, gibbs_iterations)
+                    reconstructed_data, _, reconstrcted_label = self.reconstructor(dataset, label)
                     train_loss += torch.mean(torch.abs(dataset - reconstructed_data.to(self.device))) + torch.mean(torch.abs(label - reconstrcted_label.to(self.device)))
                     regression_loss += torch.mean(torch.abs(label - reconstrcted_label.to(self.device)))
                     counter += 1
@@ -558,48 +558,46 @@ class DBM:
             torch.save(model, savefile)     
             self.save_model()   
 
-    def reconstructor(self, x: torch.Tensor, label: torch.Tensor, repeat: int = 1, depth: int = -1) -> torch.Tensor:
+    def reconstructor(self, x: torch.Tensor, label: torch.Tensor, depth: int = -1) -> torch.Tensor:
         """
         Reconstruct input
         """
         if (depth == -1):
             depth = len(self.layers)
-        
-        for _ in range(repeat):
-            x_gen = []
-            r_gen = []
-            for _ in range(self.k):
-                x_dash = x.clone()
-                for i in range(depth):
-                    if (i == len(self.layers)-1):
-                        _, r_dash = self.sample_h(i, x_dash)
-                        _, r_dash = self.sample_r(r_dash)
-                        r_gen.append(r_dash)
-                        _, x_dash = self.sample_h(i, x_dash, label)
-                    else:
-                        _, x_dash = self.sample_h(i, x_dash)
 
-                x_gen.append(x_dash)
-            x_dash = torch.stack(x_gen)
-            x_dash = torch.mean(x_dash, dim=0)
-            r_dash = torch.stack(r_gen)
-            r_dash = torch.mean(r_dash, dim=0)
+        x_gen = []
+        r_gen = []
+        for _ in range(self.k):
+            x_dash = x.clone()
+            for i in range(depth):
+                if (i == len(self.layers)-1):
+                    _, r_dash = self.sample_h(i, x_dash)
+                    _, r_dash = self.sample_r(r_dash)
+                    r_gen.append(r_dash)
+                    _, x_dash = self.sample_h(i, x_dash, label)
+                else:
+                    _, x_dash = self.sample_h(i, x_dash)
 
-            y = x_dash
+            x_gen.append(x_dash)
+        x_dash = torch.stack(x_gen)
+        x_dash = torch.mean(x_dash, dim=0)
+        r_dash = torch.stack(r_gen)
+        r_dash = torch.mean(r_dash, dim=0)
 
-            y_gen = []
-            for _ in range(repeat):
-                y_dash = y.clone()
-                for i in range(depth-1, -1, -1):
-                    _, y_dash = self.sample_v(i, y_dash)
-                y_gen.append(y_dash)
-            y_dash = torch.stack(y_gen)
-            y_dash = torch.mean(y_dash, dim=0)
-            x = y_dash
+        y = x_dash
+
+        y_gen = []
+        for _ in range(self.k):
+            y_dash = y.clone()
+            for i in range(depth-1, -1, -1):
+                _, y_dash = self.sample_v(i, y_dash)
+            y_gen.append(y_dash)
+        y_dash = torch.stack(y_gen)
+        y_dash = torch.mean(y_dash, dim=0)
 
         return y_dash, x_dash, r_dash
 
-    def reconstruct(self, dataloader: DataLoader, repeat: int = 1, depth: int = -1) -> DataLoader:
+    def reconstruct(self, dataloader: DataLoader, depth: int = -1) -> DataLoader:
         """
         Reconstruct input
         """
@@ -610,7 +608,7 @@ class DBM:
         for batch, label in dataloader:
             batch = batch.to(self.device)
             label = label.unsqueeze(1).to(torch.float32).to(self.device)
-            visible, latent, pseudo_labels = self.reconstructor(batch, label, repeat, depth)
+            visible, latent, pseudo_labels = self.reconstructor(batch, label, depth)
             visible_data.append(visible)
             latent_vars.append(latent)
             data_labels.append(label)
