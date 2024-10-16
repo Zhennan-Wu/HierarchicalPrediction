@@ -531,15 +531,15 @@ class DBM:
                 learning.set_description(str(details))
                 learning.refresh()    
 
-                if (train_loss.item()/counter > self.previous_loss_before_stagnation and epoch>self.early_stopping_patient+1):
-                    self.stagnation += 1
-                    if (self.stagnation == self.early_stopping_patient-1):
-                        learning.close()
-                        print("Not Improving the stopping training loop.")
-                        break
-                else:
-                    self.previous_loss_before_stagnation = train_loss.item()/counter
-                    self.stagnation = 0
+                # if (train_loss.item()/counter > self.previous_loss_before_stagnation and epoch>self.early_stopping_patient+1):
+                #     self.stagnation += 1
+                #     if (self.stagnation == self.early_stopping_patient-1):
+                #         learning.close()
+                #         print("Not Improving the stopping training loop.")
+                #         break
+                # else:
+                #     self.previous_loss_before_stagnation = train_loss.item()/counter
+                #     self.stagnation = 0
                 
                 end_time = time.time()
                 print("Time taken for DBM epoch {} is {}".format(epoch, end_time-start_time))
@@ -739,6 +739,6 @@ if __name__ == "__main__":
     dataset = TensorDataset(train_x, train_y)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     
-    dbm = DBM(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 400, savefile="dbm.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 5, early_stopping_patient = 20, gaussian_top = False, top_sigma = 0.5*torch.ones((1,), dtype=torch.float32), sigma = None, disc_alpha = 0.5)
+    dbm = DBM(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 200, savefile="dbm.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 5, early_stopping_patient = 20, gaussian_top = False, top_sigma = 0.5*torch.ones((1,), dtype=torch.float32), sigma = None, disc_alpha = 0.5)
     dbm.load_model("dbn.pth")
     dbm.train(data_loader)

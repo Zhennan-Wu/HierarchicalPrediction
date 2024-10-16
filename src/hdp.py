@@ -35,9 +35,9 @@ class HierarchicalDirichletProcess:
         '''
         ########################################################################################
         # fixed features
-        ########################################################################################
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # self.device = torch.device("cpu")
+        ########################################################################0################
+        # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cpu")
 
         self.batch_size = batch_size
         # int: the number of samples in each round
@@ -548,7 +548,10 @@ class HierarchicalDirichletProcess:
         joint_prob = []
         data = data.to(self.device)
         concatenated_data = torch.sum(data, dim=1)
-        learning = trange(number_of_iterations, desc=str("Gibbs Update of Epoch {} Batch {} Starting...".format(epoch, batch_index)))
+        if (not test):
+            learning = trange(number_of_iterations, desc=str("Gibbs Update of Epoch {} Batch {} Starting...".format(epoch, batch_index)))
+        else:
+            learning = trange(number_of_iterations, desc=str("Gibbs Update of Test Data Batch {} Starting...".format(batch_index)))
         for round in learning:
             self.posterior_update_of_params(concatenated_data)
             self.posterior_update_of_distributions()
@@ -559,7 +562,17 @@ class HierarchicalDirichletProcess:
         learning.close()
         if (not test):
             self.update_cumulated_weights()
-    
+
+    def infer_dataloader(self, number_of_iterations: int, dataloader: DataLoader):
+        '''
+        Infer the Hierarchical Dirichlet Process using Gibbs Sampling with a dataloader
+        '''
+        batch_index = 0
+        for data, label in dataloader:
+            batch_index += 1
+            self.gibbs_update(0, batch_index, number_of_iterations, data, True)
+            self.display_hierarchical_results(label)
+
     def gibbs_dataloader_update(self, epochs: int, number_of_iterations: int, dataloader: DataLoader, test: bool = False):
         '''
         Update the Hierarchical Dirichlet Process using Gibbs Sampling with a dataloader
@@ -947,31 +960,51 @@ class HierarchicalDirichletProcess:
             labels.append(torch.tensor(p_labels, device = self.device))
         return labels
     
-    
+
+def generate_pseudo_samples(data_sizes: list, dimension: int, sample_size: int):
+    '''
+    '''
+    categories = len(data_sizes)
+    variable_size = int(dimension/categories)
+    data = []
+    labels = []
+    ordered_categories = list(range(categories))
+    random.shuffle(ordered_categories)
+    print(ordered_categories)
+    for cat_size, index in zip(data_sizes, ordered_categories):
+        for _ in range(cat_size):
+            new_data = torch.zeros((sample_size, dimension), dtype = torch.int)
+            indices = torch.randint(0, variable_size, (sample_size,))
+            one_hot_vectors = torch.zeros(sample_size, variable_size)
+            one_hot_vectors.scatter_(1, indices.unsqueeze(1), 1)
+            new_data[:, index*variable_size:(index+1)*variable_size] = one_hot_vectors
+            data.append(new_data)
+            labels.append(index)
+    data = torch.stack(data, dim=0).to(torch.float)
+    labels = torch.tensor(labels, dtype = torch.float)
+    return data, labels
+
+        
+
 if __name__ == "__main__":
 
     input_dimen = 10
     batch_size = 20
-    number_of_latent_sample = 3
+    number_of_latent_sample = 10
+    data_sizes = [105, 10, 105]
 
-    gibbs_sampling_iterations = 200
-    batch_index = 1
+    train_x, train_y = generate_pseudo_samples(data_sizes, input_dimen, number_of_latent_sample)
+    for (x, y) in zip(train_x, train_y):
+        print("data", x)
+        print("label", y)
 
-    hdp_depth = 3
-    hdp_truncate_length = 10
-    hdp_constraints = {2: 10}
+    gibbs_sampling_iterations = 50
 
-    data = []
-    params1 = torch.rand(input_dimen)
-    params2 = torch.rand(input_dimen)
-    params3 = torch.rand(input_dimen)
-    data.append(Dirichlet(params1).sample((batch_size, number_of_latent_sample, )))
-    data.append(Dirichlet(params2).sample((batch_size, number_of_latent_sample, )))
-    data.append(Dirichlet(params3).sample((batch_size, number_of_latent_sample, )))
-    data = torch.cat(data, dim = 0)
+    latentloader = DataLoader(TensorDataset(train_x, train_y), batch_size=batch_size, shuffle=True)
 
-    hp = HierarchicalDirichletProcess(input_dimen, hdp_depth, data.shape[0], hdp_truncate_length, hdp_constraints)
+    hp = HierarchicalDirichletProcess(latent_dimension=input_dimen, layers=3, batch_size=batch_size, truncated_length=10, fixed_layers={2: 3})
 
-    hp.gibbs_update(batch_index, gibbs_sampling_iterations, data)
-    hp.display_hierarchical_results()
+    hp.gibbs_dataloader_update(epochs=10, number_of_iterations=gibbs_sampling_iterations, dataloader=latentloader)
+    
+    hp.infer_dataloader(number_of_iterations=gibbs_sampling_iterations, dataloader=latentloader)
 
