@@ -888,14 +888,20 @@ class HierarchicalDirichletProcess:
             if (len(self.cumulative_weights) == 0):
                 param_count = torch.zeros(self.truncate_length, device = self.device)
             else:   
-                param_count = self.cumulative_weights[level][category]        
+                if (category not in self.cumulative_weights[level].keys()):
+                    param_count = torch.zeros(self.truncate_length, device = self.device)
+                else:
+                    param_count = self.cumulative_weights[level][category]        
         else:
             parameters = self.latent_distribution_indices[indice]
             unique_parameters, count = torch.unique(parameters, return_counts=True)
             if (len(self.cumulative_weights) == 0):
                 param_count = torch.zeros(self.truncate_length, device = self.device)
             else:   
-                param_count = self.cumulative_weights[level][category]
+                if (category not in self.cumulative_weights[level].keys()):
+                    param_count = torch.zeros(self.truncate_length, device = self.device)
+                else:
+                    param_count = self.cumulative_weights[level][category]
             param_count[unique_parameters.flatten()] += count
         return param_count
         
