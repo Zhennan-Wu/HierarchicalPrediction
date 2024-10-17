@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J dbm
+#SBATCH -J hdp
 #SBATCH -p gpu
 #SBATCH -o ../outputs/output_%j.txt
 #SBATCH -e ../outputs/error_%j.err
@@ -21,5 +21,6 @@ conda activate hdp
 
 #Run your program
 # srun python3 ./dbn.py 
-srun python3 ./dbm.py
+# srun python3 ./dbm.py
+srun python3 ./hdp.py
 # srun python3 ./hdp_dbm.py

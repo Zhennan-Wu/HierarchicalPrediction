@@ -16,14 +16,14 @@ import random
 import os
 from tqdm import trange
 
-from utils import transfer_index_tensor_to_tuple, transfer_index_tuple_to_tensor, calc_sequential_stick_breaking_weight, print_tree, INFO
+from utils import transfer_index_tensor_to_tuple, transfer_index_tuple_to_tensor, calc_sequential_stick_breaking_weight, print_tree, INFO, HDP_DIST_INFO
 
 
 PyTree = Union[jnp.ndarray, List['PyTree'], Tuple['PyTree', ...], Dict[Any, 'PyTree']]
 
 
 class HierarchicalDirichletProcess:
-    def __init__(self, latent_dimension: int, layers: int, batch_size: int, truncated_length: int, fixed_layers: dict = None):
+    def __init__(self, latent_dimension: int, layers: int, batch_size: int, truncated_length: int, slot_limit: int, fixed_layers: dict = None):
         '''
         Initialize a Hierarchical Dirichlet Process with layers
 
@@ -36,8 +36,8 @@ class HierarchicalDirichletProcess:
         ########################################################################################
         # fixed features
         ########################################################################0################
-        # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.device = torch.device("cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # self.device = torch.device("cpu")
 
         self.batch_size = batch_size
         # int: the number of samples in each round
@@ -101,6 +101,14 @@ class HierarchicalDirichletProcess:
         # list of dict: the cumulative weights of all parameters in each category in each level across different batches
         #  - key: the parent category
         #  - value: the cumulative counts of all parameters
+
+        self.dist_slots = []
+        # list of HDP_DIST_INFO: the distribution information stored in batches to represent the model learnt distribution
+
+        self.dist_slot_limit = slot_limit
+        # int: the number of distribution information stored in the model (early batch will be substituted by the new batch if slot is full
+
+        self.current_slot_size = 0
 
         self.latent_distribution_indices = torch.zeros(self.batch_size, dtype=torch.int, device=self.device)
         # torch.Tensor: the parameter indices of each sample
@@ -475,7 +483,36 @@ class HierarchicalDirichletProcess:
                             self.cumulative_weights[level][category] = param_count
                         else:
                             self.cumulative_weights[level][category] += param_count
-            
+    
+    def update_batch_dist_info(self):
+        '''
+        Store the information of the batch
+        '''
+        batch_info = HDP_DIST_INFO(self.number_of_subcategories, self.labels_group_by_categories, self.latent_distribution_indices)
+        if (self.current_slot_size < self.dist_slot_limit):
+            self.dist_slots.append(batch_info)
+            self.current_slot_size += 1
+        else:
+            batch_info_to_remove = self.dist_slots.pop(0)
+            self.dist_slots.append(batch_info)
+            self.delete_early_samples_in_cumulated_weights(batch_info_to_remove)
+        
+    def delete_early_samples_in_cumulated_weights(self, batch_info_to_remove: HDP_DIST_INFO):
+        '''
+        Denoise the cumulated weights of the Hierarchical Dirichlet Process
+        '''
+        for level in range(self.layers):
+            for category in batch_info_to_remove.number_of_subcategories[level].keys():
+                indice = batch_info_to_remove.labels_group_by_categories[level][category]
+                if (indice is None):
+                    continue
+                else:
+                    parameters = batch_info_to_remove.latent_distribution_indices[indice]
+                    unique_parameters, count = torch.unique(parameters, return_counts=True)
+                    param_count = torch.zeros(self.truncate_length, device = self.device)
+                    param_count[unique_parameters.flatten()] += count
+                    self.cumulative_weights[level][category] -= param_count
+
     def posterior_update_of_distributions(self):
         '''
         Update the posteriors of the Hierarchical Dirichlet Process
@@ -562,16 +599,21 @@ class HierarchicalDirichletProcess:
         learning.close()
         if (not test):
             self.update_cumulated_weights()
+            self.update_batch_dist_info()
 
     def infer_dataloader(self, number_of_iterations: int, dataloader: DataLoader):
         '''
         Infer the Hierarchical Dirichlet Process using Gibbs Sampling with a dataloader
         '''
         batch_index = 0
+        directory = '../results/printouts/hdp/'
+        if not os.path.exists(directory):
+            os.makedirs(directory)
         for data, label in dataloader:
             batch_index += 1
             self.gibbs_update(0, batch_index, number_of_iterations, data, True)
-            self.display_hierarchical_results(label)
+            file = directory + "hdp_batch{}.txt".format(batch_index)
+            self.display_hierarchical_results(label, file)
 
     def gibbs_dataloader_update(self, epochs: int, number_of_iterations: int, dataloader: DataLoader, test: bool = False):
         '''
@@ -630,12 +672,12 @@ class HierarchicalDirichletProcess:
                         tree[cc] = {"labels": self.labels_group_by_categories[-1][cc], "weights": self.hierarchical_distributions[-1][cc]}
         return root
     
-    def display_hierarchical_results(self, ground_truth: torch.Tensor = None):
+    def display_hierarchical_results(self, ground_truth: torch.Tensor = None, file: str = None):
         '''
         Display the hierarchical results of the Hierarchical Dirichlet Process
         '''
         label_hierarchy = self.summarize_hierarchical_results(ground_truth)
-        print_tree(label_hierarchy)
+        print_tree(label_hierarchy, file)
 
     def _increase_categories(self, new_categories: list, new_labels: list): 
         '''
@@ -989,22 +1031,20 @@ def generate_pseudo_samples(data_sizes: list, dimension: int, sample_size: int):
 if __name__ == "__main__":
 
     input_dimen = 10
-    batch_size = 20
+    batch_size = 50
     number_of_latent_sample = 10
-    data_sizes = [105, 10, 105]
+    data_sizes = [1050, 100, 1050]
+    slot_limit = sum(data_sizes)//batch_size
 
     train_x, train_y = generate_pseudo_samples(data_sizes, input_dimen, number_of_latent_sample)
     for (x, y) in zip(train_x, train_y):
         print("data", x)
         print("label", y)
-
     gibbs_sampling_iterations = 50
 
     latentloader = DataLoader(TensorDataset(train_x, train_y), batch_size=batch_size, shuffle=True)
 
-    hp = HierarchicalDirichletProcess(latent_dimension=input_dimen, layers=3, batch_size=batch_size, truncated_length=10, fixed_layers={2: 3})
-
+    hp = HierarchicalDirichletProcess(latent_dimension=input_dimen, layers=3, batch_size=batch_size, truncated_length=10, slot_limit=slot_limit, fixed_layers={2: 10})
     hp.gibbs_dataloader_update(epochs=10, number_of_iterations=gibbs_sampling_iterations, dataloader=latentloader)
-    
     hp.infer_dataloader(number_of_iterations=gibbs_sampling_iterations, dataloader=latentloader)
 

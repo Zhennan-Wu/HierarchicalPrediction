@@ -6,8 +6,23 @@ from pyro.distributions import Categorical
 from typing import Any, Union, List, Tuple, Dict
    
 
+class HDP_DIST_INFO:
+    def __init__(self, number_of_subcategories: dict, labels_group_by_categories: dict, latent_distribution_indices: torch.Tensor) -> None:
+        self.number_of_subcategories = number_of_subcategories
+        self.labels_group_by_categories = labels_group_by_categories
+        self.latent_distribution_indices = latent_distribution_indices
+    
+    def get_number_of_subcategories(self):
+        return self.number_of_subcategories
+    
+    def get_labels_group_by_categories(self):
+        return self.labels_group_by_categories
+    
+    def get_latent_distribution_indices(self):
+        return self.latent_distribution_indices
+    
 class INFO:
-    def __init__(self, count, label, param) -> None:
+    def __init__(self, count: int, label: torch.Tensor, param: torch.Tensor) -> None:
         self.count = count
         self.label = label
         self.param = param
@@ -67,18 +82,34 @@ def transfer_index_tuple_to_tensor(indices: list):
     return torch.stack(index_tensor)
 
 
-def print_tree(d, indent=0):
+def print_tree(d, indent:int =0, file: str = None):
     # Loop through dictionary items
-    for key, value in d.items():
-        # Print the key with proper indentation
-        print('    ' * indent + str(key))
-        
-        # If value is another dictionary, recursively call the function
-        if isinstance(value, dict):
-            print_tree(value, indent + 1)
-        # If the value is a tensor, print its content
-        elif isinstance(value, torch.Tensor):
-            print('    ' * (indent + 1) + f'Tensor: {value}')
-        else:
-            # Print the value with additional indentation
-            print('    ' * (indent + 1) + str(value))
+    if (file != None):
+        with open(file, 'w') as f:
+            for key, value in d.items():
+                # Print the key with proper indentation
+                print('    ' * indent + str(key), file=f)
+                
+                # If value is another dictionary, recursively call the function
+                if isinstance(value, dict):
+                    print_tree(value, indent + 1, file=f)
+                # If the value is a tensor, print its content
+                elif isinstance(value, torch.Tensor):
+                    print('    ' * (indent + 1) + f'Tensor: {value}', file=f)
+                else:
+                    # Print the value with additional indentation
+                    print('    ' * (indent + 1) + str(value), file=f)
+    else:  
+        for key, value in d.items():
+            # Print the key with proper indentation
+            print('    ' * indent + str(key))
+            
+            # If value is another dictionary, recursively call the function
+            if isinstance(value, dict):
+                print_tree(value, indent + 1)
+            # If the value is a tensor, print its content
+            elif isinstance(value, torch.Tensor):
+                print('    ' * (indent + 1) + f'Tensor: {value}')
+            else:
+                # Print the value with additional indentation
+                print('    ' * (indent + 1) + str(value))
