@@ -391,7 +391,7 @@ class DBM:
         plt.savefig(directory + plot_title.replace(" ", "_") + ".png")
         plt.close()
 
-    def train(self, dataloader: DataLoader, gibbs_iterations: int=210, mf_maximum_steps: int=300, mf_threshold: float=0.1, convergence_consecutive_hits: int=3):
+    def train(self, dataloader: DataLoader, gibbs_iterations: int=50, mf_maximum_steps: int=300, mf_threshold: float=0.1, convergence_consecutive_hits: int=3):
         """
         Train DBM
         """
@@ -547,10 +547,9 @@ class DBM:
                     savefile = "dbm_epoch_{}.pth".format(epoch)
                     self.save_model(savefile)
                     print("Model saved at epoch", epoch)
-
+                if (epoch%10 == 0):
+                    self.visualize_training_curve()
         learning.close()   
-
-        self.visualize_training_curve()
 
         if (self.savefile != None):
             model = self.initialize_nn_model()
