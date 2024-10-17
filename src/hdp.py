@@ -1034,7 +1034,7 @@ if __name__ == "__main__":
     batch_size = 50
     number_of_latent_sample = 10
     data_sizes = [1050, 100, 1050]
-    slot_limit = sum(data_sizes)//batch_size
+    slot_limit = min(int(sum(data_sizes)/batch_size), 50)
 
     train_x, train_y = generate_pseudo_samples(data_sizes, input_dimen, number_of_latent_sample)
     for (x, y) in zip(train_x, train_y):
