@@ -1,0 +1,31 @@
+Reconstructed HDP distribution tree:
+(0,)
+    (0, 0)
+        (0, 0, 0)
+            labels
+                Tensor: tensor([ 0,  1,  4,  5, 13, 15, 17, 18, 19])
+            weights
+                Tensor: tensor([1.1755e-38, 1.1755e-38, 1.1755e-38, 1.1755e-38, 1.8866e-02, 9.8113e-01,
+        0.0000e+00, 1.9205e-14, 5.8480e-08, 0.0000e+00])
+            true_labels
+                Tensor: tensor([0., 1., 0., 1., 0., 2., 0., 2., 1.])
+(1,)
+    (1, 0)
+        (1, 0, 0)
+            labels
+                Tensor: tensor([2])
+            weights
+                Tensor: tensor([1.1755e-38, 1.1755e-38, 1.1755e-38, 1.4378e-22, 1.2555e-01, 8.7445e-01,
+        2.1148e-35, 5.2121e-08, 0.0000e+00, 3.1067e-15])
+            true_labels
+                Tensor: tensor([1.])
+(2,)
+    (2, 0)
+        (2, 0, 0)
+            labels
+                Tensor: tensor([ 3,  6,  7,  8,  9, 10, 11, 12, 14, 16])
+            weights
+                Tensor: tensor([1.1755e-38, 1.0000e+00, 3.6713e-34, 1.2215e-14, 0.0000e+00, 2.9802e-08,
+        2.9802e-08, 1.7764e-15, 5.2940e-23, 5.2940e-23])
+            true_labels
+                Tensor: tensor([2., 2., 1., 1., 2., 0., 0., 2., 1., 1.])

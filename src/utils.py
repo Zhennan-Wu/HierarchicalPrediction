@@ -82,23 +82,39 @@ def transfer_index_tuple_to_tensor(indices: list):
     return torch.stack(index_tensor)
 
 
-def print_tree(d, indent:int =0, file: str = None):
+def print_tree(d, file:str=None, indent:int =0, opened:bool = False):
     # Loop through dictionary items
     if (file != None):
-        with open(file, 'w') as f:
+        if (not opened):
+            opened = True
+            with open(file, 'w') as f:
+                print("Reconstructed HDP distribution tree:", file=f)
             for key, value in d.items():
                 # Print the key with proper indentation
-                print('    ' * indent + str(key), file=f)
+                print('    ' * indent + str(key), file=open(file, 'a'))
                 
                 # If value is another dictionary, recursively call the function
                 if isinstance(value, dict):
-                    print_tree(value, indent + 1, file=f)
+                    print_tree(value, file, indent + 1, opened)
                 # If the value is a tensor, print its content
                 elif isinstance(value, torch.Tensor):
-                    print('    ' * (indent + 1) + f'Tensor: {value}', file=f)
+                    print('    ' * (indent + 1) + f'Tensor: {value}', file=open(file, 'a'))
                 else:
                     # Print the value with additional indentation
-                    print('    ' * (indent + 1) + str(value), file=f)
+                    print('    ' * (indent + 1) + str(value), file=open(file, 'a'))
+        else:
+            for key, value in d.items():
+                # Print the key with proper indentation
+                print('    ' * indent + str(key), file=open(file, 'a'))
+                # If value is another dictionary, recursively call the function
+                if isinstance(value, dict):
+                    print_tree(value, file, indent + 1, opened)
+                # If the value is a tensor, print its content
+                elif isinstance(value, torch.Tensor):
+                    print('    ' * (indent + 1) + f'Tensor: {value}', file=open(file, 'a'))
+                else:
+                    # Print the value with additional indentation
+                    print('    ' * (indent + 1) + str(value), file=open(file, 'a'))            
     else:  
         for key, value in d.items():
             # Print the key with proper indentation
