@@ -748,67 +748,69 @@ if __name__ == "__main__":
     # model test
     dbm.load_model("dbm.pth")
     image_index = 0
-    reconstructed_loader = dbm.reconstruct(data_loader)
-    directory = "../results/plots/DBM/Reconstructed/"
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-    for data, latent, true_label, pseudo_label in reconstructed_loader:
-        for image, value in zip(data, true_label):
-            plt.imshow(image.cpu().numpy().reshape(28, 28), cmap='gray')
-            new_directory = directory+"true_label_{}/".format(value.item())
-            if not os.path.exists(new_directory):
-                os.makedirs(new_directory)
-            plt.savefig(new_directory + "true_label_{}.png".format(image_index))
-            image_index += 1
-    # latent_loader = dbm.encode(data_loader)
-    # image_index = 0
-    # for data, true_label in latent_loader:
-    #     # Initialize KMeans and fit to the data
-    #     concatenated_data = torch.sum(data, dim = 1).cpu().numpy()
-    #     true_label = true_label.cpu().numpy().flatten()
-    #     kmeans = KMeans(n_clusters=10)
-    #     kmeans.fit(concatenated_data)
-
-    #     # Get the cluster centers and labels
-    #     centers = kmeans.cluster_centers_
-    #     labels = kmeans.labels_
-
-    #     unique_values, indices, counts = np.unique(true_label, return_index=True, return_counts=True)
-    #     for i in unique_values:
-    #         print("For number {}".format(i))
-    #         # print("Predicted labels")
-    #         predicted_labels = labels[np.where(true_label == i)]
-    #         pred_values, pred_indices, pred_counts = np.unique(predicted_labels, return_index=True, return_counts=True)
-    #         # print(labels[np.where(true_label == i)])
-    #         print("Predicted category: {}, Predict counts: {}".format(pred_values, pred_counts))
-
-    #     directory = "../results/plots/DBM/Clusters/"
-    #     if not os.path.exists(directory):
-    #         os.makedirs(directory)
-    #     for im, tl in zip(concatenated_data, true_label):
-    #         print("True label: ", tl)
-    #         plt.imshow(im.reshape(10, 10), cmap='gray')
-    #         new_directory = directory+"true_label_{}/".format(tl)
+    # reconstructed_loader = dbm.reconstruct(data_loader)
+    # directory = "../results/plots/DBM/Reconstructed/"
+    # if not os.path.exists(directory):
+    #     os.makedirs(directory)
+    # for data, latent, true_label, pseudo_label in reconstructed_loader:
+    #     for image, value in zip(data, true_label):
+    #         plt.imshow(image.cpu().numpy().reshape(28, 28), cmap='gray')
+    #         new_directory = directory+"true_label_{}/".format(value.item())
     #         if not os.path.exists(new_directory):
     #             os.makedirs(new_directory)
-    #         plt.savefig(new_directory + "{}.png".format(image_index))
+    #         plt.savefig(new_directory + "true_label_{}.png".format(image_index))
     #         image_index += 1
+    latent_loader = dbm.encode(data_loader)
+    image_index = 0
+    for data, true_label in latent_loader:
+        # Initialize KMeans and fit to the data
+        concatenated_data = torch.sum(data, dim = 1).cpu().numpy()
+        true_label = true_label.cpu().numpy().flatten()
+        kmeans = KMeans(n_clusters=10)
+        kmeans.fit(concatenated_data)
 
-        # # Assuming X is your 100-dimensional data and y_kmeans are the cluster labels
-        # # Reduce to 2D with PCA
-        # pca = PCA(n_components=2)
-        # X_pca = pca.fit_transform(concatenated_data)
+        # Get the cluster centers and labels
+        centers = kmeans.cluster_centers_
+        labels = kmeans.labels_
 
-        # # Plot the 2D projection with cluster labels
-        # plt.scatter(X_pca[:, 0], X_pca[:, 1], c=labels, cmap='viridis', s=50)
-        # plt.title('KMeans Clustering with PCA (2D projection)')
-        # plt.xlabel('PCA Component 1')
-        # plt.ylabel('PCA Component 2')
-        # plt.show()
+        unique_values, indices, counts = np.unique(true_label, return_index=True, return_counts=True)
+        for i in unique_values:
+            print("For number {}".format(i))
+            # print("Predicted labels")
+            predicted_labels = labels[np.where(true_label == i)]
+            pred_values, pred_indices, pred_counts = np.unique(predicted_labels, return_index=True, return_counts=True)
+            # print(labels[np.where(true_label == i)])
+            print("Predicted category: {}, Predict counts: {}".format(pred_values, pred_counts))
 
-        # plt.scatter(X_pca[:, 0], X_pca[:, 1], c=true_label, cmap='viridis', s=50)
-        # plt.title('KMeans Clustering with PCA (2D projection)')
-        # plt.xlabel('PCA Component 1')
-        # plt.ylabel('PCA Component 2')
-        # plt.show()        
+        # directory = "../results/plots/DBM/Clusters/"
+        # if not os.path.exists(directory):
+        #     os.makedirs(directory)
+        # for im, tl in zip(concatenated_data, true_label):
+        #     print("True label: ", tl)
+        #     plt.imshow(im.reshape(10, 10), cmap='gray')
+        #     new_directory = directory+"true_label_{}/".format(tl)
+        #     if not os.path.exists(new_directory):
+        #         os.makedirs(new_directory)
+        #     # plt.savefig(new_directory + "{}.png".format(image_index))
+        #      # image_index += 1
+        #     plt.show()
+           
+
+        # Assuming X is your 100-dimensional data and y_kmeans are the cluster labels
+        # Reduce to 2D with PCA
+        pca = PCA(n_components=2)
+        X_pca = pca.fit_transform(concatenated_data)
+
+        # Plot the 2D projection with cluster labels
+        plt.scatter(X_pca[:, 0], X_pca[:, 1], c=labels, cmap='viridis', s=50)
+        plt.title('KMeans Clustering with PCA (2D projection)')
+        plt.xlabel('PCA Component 1')
+        plt.ylabel('PCA Component 2')
+        plt.show()
+
+        plt.scatter(X_pca[:, 0], X_pca[:, 1], c=true_label, cmap='viridis', s=50)
+        plt.title('Ground truth with PCA (2D projection)')
+        plt.xlabel('PCA Component 1')
+        plt.ylabel('PCA Component 2')
+        plt.show()        
 

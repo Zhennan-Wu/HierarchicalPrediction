@@ -1039,7 +1039,6 @@ def generate_pseudo_samples(data_sizes: list, dimension: int, sample_size: int):
     return data, labels
 
         
-
 if __name__ == "__main__":
 
     input_dimen = 10
