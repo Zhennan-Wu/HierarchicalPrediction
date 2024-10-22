@@ -261,10 +261,10 @@ class DBN:
         """
         model = torch.load(savefile, weights_only=False)
         layer_parameters = []
-        for index in range(len(model)):
+        for index in range(len(model["W"])):
             layer_parameters.append({"W":model["W"][index].to(self.device), "hb":model["hb"][index].to(self.device), "vb":model["vb"][index].to(self.device)})
         
-        top_parameters = {"W":model["TW"][0].to(self.device), "hb":model["tb"][0].to(self.device), "vb":layer_parameters[-1]["hb".to(self.device)]}
+        top_parameters = {"W":model["TW"][0].to(self.device), "hb":model["tb"][0].to(self.device), "vb":layer_parameters[-1]["hb"].to(self.device)}
         self.layer_parameters = layer_parameters
         self.top_parameters = top_parameters
 
@@ -350,4 +350,23 @@ if __name__ == "__main__":
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     
     dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 400, savefile="dbn.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 5, gaussian_top = True, top_sigma = 0.5*torch.ones((1,)), sigma = None, disc_alpha = 0.5)
-    dbn.train(data_loader)
+    # dbn.train(data_loader)
+
+    dbn.load_model("dbn.pth")
+    from sklearn.cluster import KMeans
+    import matplotlib.pyplot as plt
+    from sklearn.decomposition import PCA
+    # model test
+    image_index = 0
+    reconstructed_loader = dbn.reconstruct(data_loader)
+    directory = "../results/plots/DBN/Reconstructed/"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    for data, latent, true_label in reconstructed_loader:
+        for image, value in zip(data, true_label):
+            plt.imshow(image.cpu().numpy().reshape(28, 28), cmap='gray')
+            new_directory = directory+"true_label_{}/".format(value.item())
+            if not os.path.exists(new_directory):
+                os.makedirs(new_directory)
+            plt.savefig(new_directory + "true_label_{}.png".format(image_index))
+            image_index += 1

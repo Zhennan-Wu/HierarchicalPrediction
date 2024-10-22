@@ -603,7 +603,7 @@ class DBM:
         visible_data = []
         latent_vars = []
         data_labels = []
-        pseudo_labels = []
+        pseudo_labels_list = []
         for batch, label in dataloader:
             batch = batch.to(self.device)
             label = label.unsqueeze(1).to(torch.float32).to(self.device)
@@ -611,12 +611,12 @@ class DBM:
             visible_data.append(visible)
             latent_vars.append(latent)
             data_labels.append(label)
-            pseudo_labels.append(pseudo_labels)
+            pseudo_labels_list.append(pseudo_labels)
         visible_data = torch.cat(visible_data, dim=0)
         latent_vars = torch.cat(latent_vars, dim=0)
         data_labels = torch.cat(data_labels, dim=0)
-        pseudo_labels = torch.cat(pseudo_labels, dim=0)
-        dataset = TensorDataset(visible_data, latent_vars, data_labels, pseudo_labels)
+        pseudo_labels_list = torch.cat(pseudo_labels_list, dim=0)
+        dataset = TensorDataset(visible_data, latent_vars, data_labels, pseudo_labels_list)
         return DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
    
     def encoder(self, dataset: torch.Tensor, label: torch.Tensor, repeat: int) -> torch.Tensor:
@@ -739,5 +739,76 @@ if __name__ == "__main__":
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     
     dbm = DBM(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 200, savefile="dbm.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 5, early_stopping_patient = 20, gaussian_top = False, top_sigma = 0.5*torch.ones((1,), dtype=torch.float32), sigma = None, disc_alpha = 0.5)
-    dbm.load_model("dbn.pth")
-    dbm.train(data_loader)
+    # dbm.load_model("dbn.pth")
+    # dbm.train(data_loader)
+
+    from sklearn.cluster import KMeans
+    import matplotlib.pyplot as plt
+    from sklearn.decomposition import PCA
+    # model test
+    dbm.load_model("dbm.pth")
+    image_index = 0
+    reconstructed_loader = dbm.reconstruct(data_loader)
+    directory = "../results/plots/DBM/Reconstructed/"
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+    for data, latent, true_label, pseudo_label in reconstructed_loader:
+        for image, value in zip(data, true_label):
+            plt.imshow(image.cpu().numpy().reshape(28, 28), cmap='gray')
+            new_directory = directory+"true_label_{}/".format(value.item())
+            if not os.path.exists(new_directory):
+                os.makedirs(new_directory)
+            plt.savefig(new_directory + "true_label_{}.png".format(image_index))
+            image_index += 1
+    # latent_loader = dbm.encode(data_loader)
+    # image_index = 0
+    # for data, true_label in latent_loader:
+    #     # Initialize KMeans and fit to the data
+    #     concatenated_data = torch.sum(data, dim = 1).cpu().numpy()
+    #     true_label = true_label.cpu().numpy().flatten()
+    #     kmeans = KMeans(n_clusters=10)
+    #     kmeans.fit(concatenated_data)
+
+    #     # Get the cluster centers and labels
+    #     centers = kmeans.cluster_centers_
+    #     labels = kmeans.labels_
+
+    #     unique_values, indices, counts = np.unique(true_label, return_index=True, return_counts=True)
+    #     for i in unique_values:
+    #         print("For number {}".format(i))
+    #         # print("Predicted labels")
+    #         predicted_labels = labels[np.where(true_label == i)]
+    #         pred_values, pred_indices, pred_counts = np.unique(predicted_labels, return_index=True, return_counts=True)
+    #         # print(labels[np.where(true_label == i)])
+    #         print("Predicted category: {}, Predict counts: {}".format(pred_values, pred_counts))
+
+    #     directory = "../results/plots/DBM/Clusters/"
+    #     if not os.path.exists(directory):
+    #         os.makedirs(directory)
+    #     for im, tl in zip(concatenated_data, true_label):
+    #         print("True label: ", tl)
+    #         plt.imshow(im.reshape(10, 10), cmap='gray')
+    #         new_directory = directory+"true_label_{}/".format(tl)
+    #         if not os.path.exists(new_directory):
+    #             os.makedirs(new_directory)
+    #         plt.savefig(new_directory + "{}.png".format(image_index))
+    #         image_index += 1
+
+        # # Assuming X is your 100-dimensional data and y_kmeans are the cluster labels
+        # # Reduce to 2D with PCA
+        # pca = PCA(n_components=2)
+        # X_pca = pca.fit_transform(concatenated_data)
+
+        # # Plot the 2D projection with cluster labels
+        # plt.scatter(X_pca[:, 0], X_pca[:, 1], c=labels, cmap='viridis', s=50)
+        # plt.title('KMeans Clustering with PCA (2D projection)')
+        # plt.xlabel('PCA Component 1')
+        # plt.ylabel('PCA Component 2')
+        # plt.show()
+
+        # plt.scatter(X_pca[:, 0], X_pca[:, 1], c=true_label, cmap='viridis', s=50)
+        # plt.title('KMeans Clustering with PCA (2D projection)')
+        # plt.xlabel('PCA Component 1')
+        # plt.ylabel('PCA Component 2')
+        # plt.show()        
+
