@@ -129,6 +129,23 @@ class DBN:
             dataset = TensorDataset(input_data, input_labels)
             hidden_loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
             return hidden_loader
+
+    def generate_input_dataset_for_layer(self, index: int, dataset: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+        """
+        Generate input for layer
+        """
+        if (index == 0):
+            return dataset
+        else:
+            x_gen = []
+            for _ in range(self.k):
+                x_dash = dataset.to(self.device)
+                for i in range(index):
+                    _, x_dash = self.sample_h(i, x_dash, labels)
+                x_gen.append(x_dash)
+            x_dash = torch.stack(x_gen)
+            x_dash = torch.mean(x_dash, dim=0)
+            return x_dash
         
     def train(self, dataloader: DataLoader):
         """
@@ -254,7 +271,54 @@ class DBN:
         data_labels = torch.cat(data_labels, dim=0)
         dataset = TensorDataset(visible_data, latent_vars, data_labels)
         return DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
-            
+    
+    def encoder(self, dataset: torch.Tensor, label: torch.Tensor, repeat: int, depth) -> torch.Tensor:
+        """
+        Generate top level latent variables
+        """
+        dataset = dataset.to(self.device)
+        if (self.multinomial_top and depth == len(self.layers)):
+            x_bottom = self.generate_input_dataset_for_layer(depth-1, dataset, label)
+            W_bottom = self.layer_parameters[-1]["W"].to(self.device)
+            b_bottom = self.layer_parameters[-1]["hb"].to(self.device)
+            activation = torch.matmul(x_bottom, W_bottom.t()) + b_bottom + (torch.matmul(label, self.top_parameters["W"].to(self.device)) + self.top_parameters["hb"].to(self.device))/self.top_sigma
+            p_h_given_v = torch.softmax(activation, dim=1)
+            indices = torch.multinomial(p_h_given_v, self.multinomial_sample_size, replacement=True)
+            one_hot = torch.zeros(p_h_given_v.size(0), self.multinomial_sample_size, p_h_given_v.size(1), device=self.device).scatter_(2, indices.unsqueeze(-1), 1)
+            return one_hot           
+        else:
+            x_gen = []
+            for _ in range(repeat):
+                x_dash = dataset
+                for i in range(len(self.layers)):
+                    if (i == len(self.layers)-1):
+                        _, x_dash = self.sample_h(i, x_dash, label)
+                    else:
+                        _, x_dash = self.sample_h(i, x_dash, label)
+                x_gen.append(x_dash)
+            x_dash = torch.stack(x_gen, dim=1)
+            x_dash = torch.mean(x_dash, dim=1)
+            return x_dash
+
+    def encode(self, dataloader: DataLoader,  depth: int = -1, repeat: int = 10) -> DataLoader:
+        """
+        Encode data
+        """
+        if (depth == -1):
+            depth = len(self.layers)
+        latent_vars = []
+        labels = []
+        for data, label in dataloader:
+            data = data.to(self.device)
+            label = label.unsqueeze(1).to(torch.float32).to(self.device)
+            latent_vars.append(self.encoder(data, label, repeat, depth))
+            labels.append(label)
+        latent_vars = torch.cat(latent_vars, dim=0)
+        labels = torch.cat(labels, dim=0)
+        latent_dataset = TensorDataset(latent_vars, labels)
+
+        return DataLoader(latent_dataset, batch_size=self.batch_size, shuffle=False)
+    
     def load_model(self, savefile: str):
         """
         Load DBN or DBM model
@@ -359,14 +423,162 @@ if __name__ == "__main__":
     # model test
     image_index = 0
     reconstructed_loader = dbn.reconstruct(data_loader)
-    directory = "../results/plots/DBN/Reconstructed/"
+    # directory = "../results/plots/DBN/Reconstructed/"
+
+    # for data, latent, true_label in reconstructed_loader:
+    #     for image, value in zip(data, true_label):
+    #         plt.imshow(image.cpu().numpy().reshape(28, 28), cmap='gray')
+    #         new_directory = directory+"true_label_{}/".format(value.item())
+    #         if not os.path.exists(new_directory):
+    #             os.makedirs(new_directory)
+    #         plt.savefig(new_directory + "true_label_{}.png".format(image_index))
+    #         image_index += 1
+    latent_loader = dbn.encode(data_loader)
+    first_layer = dbn.encode(data_loader, depth=1)
+    second_layer = dbn.encode(data_loader, depth=2)
+    directory = "../results/plots/DBN/UMAP/"
     if not os.path.exists(directory):
         os.makedirs(directory)
-    for data, latent, true_label in reconstructed_loader:
-        for image, value in zip(data, true_label):
-            plt.imshow(image.cpu().numpy().reshape(28, 28), cmap='gray')
-            new_directory = directory+"true_label_{}/".format(value.item())
-            if not os.path.exists(new_directory):
-                os.makedirs(new_directory)
-            plt.savefig(new_directory + "true_label_{}.png".format(image_index))
-            image_index += 1
+    for first_level, second_level, final_level, original in zip(first_layer, second_layer, latent_loader, data_loader):
+        # Initialize KMeans and fit to the data
+        data = final_level[0]
+        first_level_data = first_level[0].cpu().numpy()
+        second_level_data = second_level[0].cpu().numpy()
+        concatenated_data = torch.sum(data, dim = 1).cpu().numpy()
+        true_label = final_level[1].cpu().numpy().flatten()
+        original_data = original[0].cpu().numpy()
+        print("first level data shape: ", first_level_data.shape)  
+        print("second level data shape: ", second_level_data.shape)
+        print("concatenated data shape: ", concatenated_data.shape)
+        kmeans = KMeans(n_clusters=10)
+        kmeans.fit(concatenated_data)
+
+        # Get the cluster centers and labels
+        centers = kmeans.cluster_centers_
+        labels = kmeans.labels_
+
+        unique_values, indices, counts = np.unique(true_label, return_index=True, return_counts=True)
+        for i in unique_values:
+            print("For number {}".format(i))
+            # print("Predicted labels")
+            predicted_labels = labels[np.where(true_label == i)]
+            pred_values, pred_indices, pred_counts = np.unique(predicted_labels, return_index=True, return_counts=True)
+            # print(labels[np.where(true_label == i)])
+            print("Predicted category: {}, Predict counts: {}".format(pred_values, pred_counts))
+
+        # directory = "../results/plots/DBM/Clusters/"
+        # if not os.path.exists(directory):
+        #     os.makedirs(directory)
+        # for im, tl in zip(concatenated_data, true_label):
+        #     print("True label: ", tl)
+        #     plt.imshow(im.reshape(10, 10), cmap='gray')
+        #     new_directory = directory+"true_label_{}/".format(tl)
+        #     if not os.path.exists(new_directory):
+        #         os.makedirs(new_directory)
+        #     # plt.savefig(new_directory + "{}.png".format(image_index))
+        #      # image_index += 1
+        #     plt.show()
+           
+
+        # Assuming X is your 100-dimensional data and y_kmeans are the cluster labels
+        # Reduce to 2D with PCA
+        # pca = PCA(n_components=2)
+        # X_pca = pca.fit_transform(concatenated_data)
+
+        # # Plot the 2D projection with cluster labels
+        # plt.scatter(X_pca[:, 0], X_pca[:, 1], c=labels, cmap='viridis', s=50)
+        # plt.title('KMeans Clustering with PCA (2D projection)')
+        # plt.xlabel('PCA Component 1')
+        # plt.ylabel('PCA Component 2')
+        # plt.show()
+
+        # plt.scatter(X_pca[:, 0], X_pca[:, 1], c=true_label, cmap='viridis', s=50)
+        # plt.title('Ground truth with PCA (2D projection)')
+        # plt.xlabel('PCA Component 1')
+        # plt.ylabel('PCA Component 2')
+        # plt.show()    
+        # plt.close()    
+
+
+        import numpy as np
+        from sklearn.datasets import load_digits
+        from sklearn.model_selection import train_test_split
+        from sklearn.preprocessing import StandardScaler
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        import pandas as pd
+        sns.set(style='white', context='notebook', rc={'figure.figsize':(14,10)})
+        import umap
+
+
+        digits = concatenated_data
+        reducer = umap.UMAP(random_state=42)
+        reducer.fit(digits)
+
+        embedding = reducer.transform(digits)
+        # Verify that the result of calling transform is
+        # idenitical to accessing the embedding_ attribute
+        assert(np.all(embedding == reducer.embedding_))
+        embedding.shape        
+
+        new_dir = directory + "images_{}/".format(image_index)
+        if not os.path.exists(new_dir):
+            os.makedirs(new_dir)
+        plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
+        plt.gca().set_aspect('equal', 'datalim')
+        plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
+        plt.title('UMAP projection of the Digits dataset with final latent embedding Ground Truth', fontsize=24)
+        plt.savefig(new_dir + "final_latent_embedding.png")
+        plt.close()
+
+        digits = second_level_data
+        reducer = umap.UMAP(random_state=42)
+        reducer.fit(digits)
+
+        embedding = reducer.transform(digits)
+        # Verify that the result of calling transform is
+        # idenitical to accessing the embedding_ attribute
+        assert(np.all(embedding == reducer.embedding_))
+        embedding.shape        
+
+        plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
+        plt.gca().set_aspect('equal', 'datalim')
+        plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
+        plt.title('UMAP projection of the Digits dataset with second layer latent embedding Ground Truth', fontsize=24)
+        plt.savefig(new_dir + "second_latent_embedding.png")
+        plt.close()
+
+        digits = first_level_data
+        reducer = umap.UMAP(random_state=42)
+        reducer.fit(digits)
+
+        embedding = reducer.transform(digits)
+        # Verify that the result of calling transform is
+        # idenitical to accessing the embedding_ attribute
+        assert(np.all(embedding == reducer.embedding_))
+        embedding.shape        
+
+        plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
+        plt.gca().set_aspect('equal', 'datalim')
+        plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
+        plt.title('UMAP projection of the Digits dataset with first layer latent embedding Ground Truth', fontsize=24)
+        plt.savefig(new_dir + "first_latent_embedding.png")
+        plt.close()
+
+        digits = original_data
+        reducer = umap.UMAP(random_state=42)
+        reducer.fit(digits)
+
+        embedding = reducer.transform(digits)
+        # Verify that the result of calling transform is
+        # idenitical to accessing the embedding_ attribute
+        assert(np.all(embedding == reducer.embedding_))
+        embedding.shape        
+
+        plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
+        plt.gca().set_aspect('equal', 'datalim')
+        plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
+        plt.title('UMAP projection of the Digits dataset with original data Ground Truth', fontsize=24)
+        plt.savefig(new_dir + "original_data.png")
+        plt.close()
+        image_index += 1
