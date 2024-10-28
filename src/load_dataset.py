@@ -13,6 +13,9 @@ class MNIST:
 		self.min = np.min(x)
 		self.max = np.max(x)
 
+	def binarize(self, x):
+		return (x > 0.5).astype(np.float32)
+	
 	def transform_normalizer(self, x):
 		return (x - self.min)/(self.max - self.min)
 
@@ -33,6 +36,8 @@ class MNIST:
 		self.fit_normalizer(train_x)
 		train_x = self.transform_normalizer(train_x)
 		test_x = self.transform_normalizer(test_x)
+		train_x = self.binarize(train_x)
+		test_x = self.binarize(test_x)
 
 		train_x, train_y, test_x, test_y = torch.from_numpy(train_x), torch.from_numpy(train_y), torch.from_numpy(test_x), torch.from_numpy(test_y)	
 
