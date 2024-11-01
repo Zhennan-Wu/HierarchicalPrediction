@@ -178,7 +178,7 @@ class DBN:
             # rbm.train(hidden_loader)
             rbm.fit(X)
             params = rbm.get_params()
-            self.layer_parameters[index]["W"] = torch.tenor(params["components_"], dtype=torch.float32, device=self.device)
+            self.layer_parameters[index]["W"] = torch.tensor(params["components_"], dtype=torch.float32, device=self.device)
             if (self.bias):
                 self.layer_parameters[index]["hb"] = torch.tensor(params["intercept_hidden_"], dtype=torch.float32, device=self.device)
                 self.layer_parameters[index]["vb"] = torch.tensor(params["intercept_visible_"], dtype=torch.float32, device=self.device)

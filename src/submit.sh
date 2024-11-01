@@ -20,7 +20,7 @@ module load nvidia/21.5
 conda activate hdp
 
 #Run your program
-srun python3 ./dbn.py 
+srun python3 ./dbn_new.py 
 # srun python3 ./dbm.py
 # srun python3 ./hdp.py
 # srun python3 ./hdp_dbm.py
