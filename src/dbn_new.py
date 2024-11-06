@@ -1,7 +1,7 @@
 import torch
 import time
 from typing import Any, Union, List, Tuple, Dict
-from rbm import RBM
+from rbm_old import RBM
 from torch.utils.data import DataLoader, TensorDataset
 # import matplotlib
 # matplotlib.use('TkAgg')
@@ -53,8 +53,8 @@ class DBN:
         Sample visible units given hidden units
         """
         W = self.layer_parameters[layer_index]["W"]
-        vb = self.layer_parameters[layer_index]["vb"]
-        activation = torch.matmul(y, W) + vb
+        # vb = self.layer_parameters[layer_index]["vb"]
+        activation = torch.matmul(y, W) # + vb
 
         if (self.mode == "bernoulli"):
             p_v_given_h = torch.sigmoid(activation)
@@ -73,11 +73,11 @@ class DBN:
         Sample hidden units given visible units
         """
         W_bottom = self.layer_parameters[layer_index]["W"]
-        b_bottom = self.layer_parameters[layer_index]["hb"]
+        # b_bottom = self.layer_parameters[layer_index]["hb"]
         if (layer_index == 0):
-            activation = torch.matmul(x_bottom/self.sigma, W_bottom.t()) + b_bottom
+            activation = torch.matmul(x_bottom/self.sigma, W_bottom.t()) # + b_bottom
         else:    
-            activation =torch.matmul(x_bottom, W_bottom.t()) + b_bottom 
+            activation =torch.matmul(x_bottom, W_bottom.t()) # + b_bottom 
 
         if (layer_index == len(self.layers)-1 and self.multinomial_top):
             if (top_down_sample):
@@ -177,11 +177,10 @@ class DBN:
             Y = Y.detach().cpu().numpy()
             # rbm.train(hidden_loader)
             rbm.fit(X)
-            params = rbm.get_params()
-            self.layer_parameters[index]["W"] = torch.tensor(params["components_"], dtype=torch.float32, device=self.device)
+            self.layer_parameters[index]["W"] = torch.tensor(rbm.components_, dtype=torch.float32, device=self.device)
             if (self.bias):
-                self.layer_parameters[index]["hb"] = torch.tensor(params["intercept_hidden_"], dtype=torch.float32, device=self.device)
-                self.layer_parameters[index]["vb"] = torch.tensor(params["intercept_visible_"], dtype=torch.float32, device=self.device)
+                self.layer_parameters[index]["hb"] = torch.tensor(rbm.intercept_hidden_, dtype=torch.float32, device=self.device)
+                self.layer_parameters[index]["vb"] = torch.tensor(rbm.intercept_visible_, dtype=torch.float32, device=self.device)
             # self.top_parameters["W"] = rbm.top_weights
             # self.top_parameters["hb"] = rbm.top_bias
             # self.top_parameters["vb"] = rbm.hidden_bias
@@ -239,7 +238,8 @@ class DBN:
             x_dash = x.clone()
             for i in range(depth):
                 if (i == len(self.layers)-1 and self.gaussian_top):
-                    top_down_sample = True
+                    # top_down_sample = True
+                    top_down_sample = False
                     _, x_dash = self.sample_h(i, x_dash, y, top_down_sample)
                 else:
                     _, x_dash = self.sample_h(i, x_dash, y)
@@ -288,8 +288,8 @@ class DBN:
         if (self.multinomial_top and depth == len(self.layers)):
             x_bottom = self.generate_input_dataset_for_layer(depth-1, dataset, label)
             W_bottom = self.layer_parameters[-1]["W"].to(self.device)
-            b_bottom = self.layer_parameters[-1]["hb"].to(self.device)
-            activation = torch.matmul(x_bottom, W_bottom.t()) + b_bottom + (torch.matmul(label, self.top_parameters["W"].to(self.device)) + self.top_parameters["hb"].to(self.device))/self.top_sigma
+            # b_bottom = self.layer_parameters[-1]["hb"].to(self.device)
+            activation = torch.matmul(x_bottom, W_bottom.t()) # + b_bottom # + (torch.matmul(label, self.top_parameters["W"].to(self.device)) + self.top_parameters["hb"].to(self.device))/self.top_sigma
             p_h_given_v = torch.softmax(activation, dim=1)
             indices = torch.multinomial(p_h_given_v, self.multinomial_sample_size, replacement=True)
             one_hot = torch.zeros(p_h_given_v.size(0), self.multinomial_sample_size, p_h_given_v.size(1), device=self.device).scatter_(2, indices.unsqueeze(-1), 1)
@@ -334,11 +334,11 @@ class DBN:
         model = torch.load(savefile, weights_only=False)
         layer_parameters = []
         for index in range(len(model["W"])):
-            layer_parameters.append({"W":model["W"][index].to(self.device), "hb":model["hb"][index].to(self.device), "vb":model["vb"][index].to(self.device)})
-        
-        top_parameters = {"W":model["TW"][0].to(self.device), "hb":model["tb"][0].to(self.device), "vb":layer_parameters[-1]["hb"].to(self.device)}
+            # layer_parameters.append({"W":model["W"][index].to(self.device), "hb":model["hb"][index].to(self.device), "vb":model["vb"][index].to(self.device)})
+            layer_parameters.append({"W":model["W"][index].to(self.device)})
+        # top_parameters = {"W":model["TW"][0].to(self.device), "hb":model["tb"][0].to(self.device), "vb":layer_parameters[-1]["hb"].to(self.device)}
         self.layer_parameters = layer_parameters
-        self.top_parameters = top_parameters
+        # self.top_parameters = top_parameters
 
     def load_nn_model(self, savefile: str):
         """
@@ -421,11 +421,11 @@ if __name__ == "__main__":
     dataset = TensorDataset(train_x, train_y)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     
-    dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 400, savefile="dbn.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 5, gaussian_top = True, top_sigma = 0.5*torch.ones((1,)), sigma = None, disc_alpha = 0.5)
-    dbn.train(data_loader)
-    print("Training completed")
+    dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 10, savefile="dbn.pth", mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 5, gaussian_top = False, top_sigma = 0.5*torch.ones((1,)), sigma = None, disc_alpha = 0.5)
+    # dbn.train(data_loader)
+    # print("Training completed")
 
-    # dbn.load_model("dbn.pth")
+    dbn.load_model("dbn.pth")
     from sklearn.cluster import KMeans
     import matplotlib.pyplot as plt
     from sklearn.decomposition import PCA
@@ -454,10 +454,10 @@ if __name__ == "__main__":
     final_level, _ = latent_loader.dataset.tensors
     original, labels = data_loader.dataset.tensors
 
-    data = final_level
+    data = final_level.detach().cpu().numpy()
     first_level_data = first_level.cpu().numpy()
     second_level_data = second_level.cpu().numpy()
-    concatenated_data = torch.sum(data, dim = 1).cpu().numpy()
+    # concatenated_data = torch.sum(data, dim = 1).cpu().numpy()
     true_label = labels.cpu().numpy().flatten()
     original_data = original.cpu().numpy()
 
@@ -472,7 +472,8 @@ if __name__ == "__main__":
     import umap
 
 
-    digits = concatenated_data
+    # digits = concatenated_data
+    digits = data
     reducer = umap.UMAP(random_state=42)
     reducer.fit(digits)
 

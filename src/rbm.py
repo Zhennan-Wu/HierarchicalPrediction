@@ -1,486 +1,547 @@
-import os
-import time
 import numpy as np
+import time
+from numbers import Integral, Real
+import scipy.sparse as sp
+from scipy.special import expit, softmax  # logistic function
 import torch
-from torch.utils.data import DataLoader, TensorDataset, Dataset
-from tqdm import trange
-from typing import Any, Union, List, Tuple, Dict
-# import matplotlib
-# matplotlib.use('TkAgg')
-import matplotlib.pyplot as plt
+from torch.utils.data import DataLoader
 
-from load_dataset import MNIST
+from sklearn.neural_network import BernoulliRBM
+from sklearn.base import (
+    BaseEstimator,
+    ClassNamePrefixFeaturesOutMixin,
+    TransformerMixin,
+    _fit_context,
+)
+from sklearn.utils import check_random_state, gen_even_slices
+from sklearn.utils._param_validation import Interval
+from sklearn.utils.extmath import safe_sparse_dot
+from sklearn.utils.validation import check_is_fitted
 
+class RBM(BernoulliRBM):
+    def __init__(self, n_components=2, learning_rate=0.1, batch_size=10, n_iter=10, verbose=0, random_state=None, add_bias=False, target_in_model=False, input_dist='bernoulli', latent_dist='bernoulli',target_dist='gaussian'):
+        super().__init__(n_components=n_components, learning_rate=learning_rate,
+                         batch_size=batch_size, n_iter=n_iter, verbose=verbose, random_state=random_state)
+        self.add_bias = add_bias
+        self.input_dist = input_dist # 'bernoulli' or 'gaussian'
+        self.latent_dist = latent_dist # 'bernoulli' or 'multinomial'
+        self.target_dist = target_dist # 'bernoulli' or 'gaussian'
+        self.target_in_model = target_in_model
 
-class RBM:
-    """
-    Restricted Boltzmann Machine
-    """
-    def __init__(self, num_visible: int, num_hidden: int, batch_size: int = 32, epochs: int = 5, savefile: str = None, bias: bool = False, lr: float = 0.001, mode: str = "bernoulli", multinomial_sample_size: int = 0, k: int = 3, optimizer: str = "adam", early_stopping_patient: int = 5, gaussian_top: bool = False, top_sigma: torch.Tensor = None, sigma: torch.Tensor = None, disc_alpha: float = 0.):
-        """
-        Initialize RBM
-        """
-        if (torch.cuda.is_available()):
-            self.device = torch.device("cuda")
-        else:
-            self.device = torch.device("cpu")
-        # self.device = torch.device("cpu")
-        self.mode = mode
-        self.multinomial_sample_size = multinomial_sample_size
-        self.bias = bias
-        self.num_visible = num_visible
-        self.num_hidden = num_hidden
-        self.lr = lr
-        self.epochs = epochs
-        self.batch_size = batch_size
-        self.k = k
-        self.optimizer = optimizer
-        self.beta_1 = 0.9
-        self.beta_2 = 0.999
-        self.epsilon = 1e-7
-        self.m = [0, 0, 0, 0, 0]
-        self.v = [0, 0, 0, 0, 0]
-        self.m_batches = {0:[], 1:[], 2:[], 3:[], 4:[]}
-        self.v_batches = {0:[], 1:[], 2:[], 3:[], 4:[]}
-        self.savefile = savefile
-        self.early_stopping_patient = early_stopping_patient
-        self.stagnation = 0
-        self.previous_loss_before_stagnation = 0
-        self.progress = []
-        self.regression_progress = []
-        self.gaussian_top = gaussian_top
-        if  (top_sigma == None):
-            self.top_sigma = torch.ones((1,), dtype = torch.float32, device=self.device)
-        else:
-            self.top_sigma = top_sigma.to(torch.float32).to(self.device)
-        if (sigma == None):
-            self.sigma = torch.ones((num_visible,), dtype = torch.float32, device=self.device)
-        else:
-            self.sigma = sigma.to(torch.float32).to(self.device)
-        self.disc_alpha = disc_alpha
+    def transform(self, X, y):
+        """Compute the hidden layer activation probabilities, P(h=1|v=X).
 
-        # Initialize weights (handle different mode and setting here by initialization)
-        std = 4*np.sqrt(6./(self.num_visible + self.num_hidden))  
-        self.weights = torch.normal(mean=0, std=std, size=(self.num_hidden, self.num_visible), device=self.device)
-        if (self.gaussian_top):
-            self.top_weights = torch.normal(mean=0, std=std, size=(1, self.num_hidden), device=self.device)
-        else:
-            self.top_weights = torch.zeros((1, self.num_hidden), dtype = torch.float32, device=self.device)
-        if (self.bias):
-            self.hidden_bias = torch.randn(self.num_hidden, dtype = torch.float32, device=self.device)
-            self.visible_bias = torch.randn(self.num_visible, dtype = torch.float32, device=self.device)
-            if (self.gaussian_top):
-                self.top_bias = torch.randn(1, dtype = torch.float32, device=self.device)
-            else:
-                self.top_bias = torch.zeros(1, dtype = torch.float32, device=self.device)
-        else:
-            self.hidden_bias = torch.zeros(self.num_hidden, dtype = torch.float32, device=self.device)
-            self.top_bias = torch.zeros(1, dtype = torch.float32, device=self.device)
-            self.visible_bias = torch.zeros(self.num_visible, dtype = torch.float32, device=self.device)
+        Parameters
+        ----------
+        X : {array-like, sparse matrix} of shape (n_samples, n_features)
+            The data to be transformed.
 
-    def sample_h(self, x: torch.Tensor, r: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        Returns
+        -------
+        h : ndarray of shape (n_samples, n_components)
+            Latent representations of the data.
         """
-        Sample hidden units given visible units
+        check_is_fitted(self)
+        # X = self._validate_data(
+        #     X, accept_sparse="csr", reset=False, dtype=(np.float64, np.float32)
+        # )
+        return self._mean_hiddens(X, y)
+
+    def _mean_hiddens(self, v, t):
+        """Computes the probabilities P(h=1|v).
+
+        Parameters
+        ----------
+        v : ndarray of shape (n_samples, n_features)
+            Values of the visible layer.
+
+        Returns
+        -------
+        h : ndarray of shape (n_samples, n_components)
+            Corresponding mean field values for the hidden layer.
         """
-        activation = torch.mm(x/self.sigma, self.weights.t()) + self.hidden_bias + torch.mm(r/self.top_sigma, self.top_weights) + self.hidden_bias
-        if (self.mode == "multinomial"):
-            p_h_given_v = torch.nn.functional.softmax(activation, dim=1)
-            indices = torch.multinomial(p_h_given_v, self.multinomial_sample_size, replacement=True)
-            one_hot = torch.zeros(p_h_given_v.size(0), self.multinomial_sample_size, p_h_given_v.size(1), device = self.device).scatter_(2, indices.unsqueeze(-1), 1)
-            variables = torch.sum(one_hot, dim=1)
+        if (self.input_dist == 'bernoulli'):
+            p = safe_sparse_dot(v, self.components_.T)
+        elif (self.input_dist == 'gaussian'):
+            p = safe_sparse_dot(v/self.sigma, self.components_.T)
         else:
-            p_h_given_v = torch.sigmoid(activation)
-            variables = torch.bernoulli(p_h_given_v)
-        return p_h_given_v, variables
-    
-    def sample_v(self, y: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Sample visible units given hidden units
-        """
-        activation = torch.mm(y, self.weights) + self.visible_bias
-        if (self.mode == "gaussian"):
-            mean = activation*self.sigma
-            gaussian_dist = torch.distributions.normal.Normal(mean, self.sigma)
-            variable = gaussian_dist.sample()
-            p_v_given_h = torch.exp(gaussian_dist.log_prob(variable))
-        else:
-            p_v_given_h = torch.sigmoid(activation)
-            variable = torch.bernoulli(p_v_given_h)
-        return p_v_given_h, variable
-    
-    def sample_r(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Sample visible units given hidden units
-        """
-        if (self.gaussian_top):
-            mean = (torch.mm(x, self.top_weights.t()) + self.top_bias)*self.top_sigma
-            gaussian_dist = torch.distributions.normal.Normal(mean, self.top_sigma)
-            variable = gaussian_dist.sample()
-            p_r_given_h = torch.exp(gaussian_dist.log_prob(variable))
-        else:
-            p_r_given_h = torch.ones((self.batch_size, 1), dtype=torch.float32, device=self.device)
-            variable = torch.ones((self.batch_size, 1), dtype=torch.float32, device=self.device)
-        return p_r_given_h, variable
+            raise ValueError("Invalid input distribution: {}".format(self.input_dist))
         
-    def adam(self, g: torch.Tensor , epoch: int, index: int) -> torch.Tensor:
-        """
-        Adam optimizer
-        """
-        self.m[index] = self.beta_1*self.m[index] + (1-self.beta_1)*g
-        self.v[index] = self.beta_2*self.v[index] + (1-self.beta_2)*torch.pow(g, 2)
-        m_hat = self.m[index]/(1-np.power(self.beta_1, epoch)) + (1 - self.beta_1)*g/(1-np.power(self.beta_1, epoch))
-        v_hat = self.v[index]/(1-np.power(self.beta_2, epoch))
-        return m_hat/(torch.sqrt(v_hat) + self.epsilon)
-    
-    def update(self, v0: torch.Tensor, vk: torch.Tensor, ph0: torch.Tensor, phk: torch.Tensor, r0: torch.Tensor, rk: torch.Tensor, epoch: int, discriminator = False):
-        """
-        Update weights and biases
-        """
-        dW = (torch.mm(v0.t(), ph0) - torch.mm(vk.t(), phk)).t()
-        dW_top = (torch.mm(ph0.t(), r0) - torch.mm(phk.t(), rk)).t()
-        dV = torch.sum(v0 - vk, dim=0)
-        dH = torch.sum(ph0 - phk, dim=0)
-        dR = torch.sum(r0 - rk, dim=0)
+        if (self.add_bias):
+            p += self.intercept_hidden_
 
-        if (self.optimizer == "adam"):
-            dW = self.adam(dW, epoch, 0)
-            dW_top = self.adam(dW_top, epoch, 1)
-            dV = self.adam(dV, epoch, 2)
-            dH = self.adam(dH, epoch, 3)
-            dR = self.adam(dR, epoch, 4)
-
-        if (discriminator):
-            self.weights += self.lr*dW*self.disc_alpha
-        else:
-            self.weights += self.lr*dW
-
-        if (self.gaussian_top):
-            if (discriminator):
-                self.top_weights += self.lr*dW_top*self.disc_alpha
+        if (self.target_in_model):
+            if (self.target_dist == 'bernoulli'):
+                p += safe_sparse_dot(t, self.target_components_)
+            elif (self.target_dist == 'gaussian'):
+                p += safe_sparse_dot(t/self.target_sigma, self.target_components_)
             else:
-                self.top_weights += self.lr*dW_top
-                
-        if (self.bias):
-            if (discriminator):
-                self.hidden_bias += self.lr*dH*self.disc_alpha
-                self.visible_bias += self.lr*dV*self.disc_alpha
-                if (self.gaussian_top):
-                    self.top_bias += self.lr*dR*self.disc_alpha
-            else:
-                self.hidden_bias += self.lr*dH
-                self.visible_bias += self.lr*dV
-                if (self.gaussian_top):
-                    self.top_bias += self.lr*dR
-
-    def train(self, dataloader: DataLoader):
-        """
-        Train RBM
-        """
-        learning = trange(self.epochs, desc=str("Starting..."))
-        for epoch in learning:
-            start_time = time.time()
-            train_loss = torch.tensor([0.], device=self.device)
-            regression_loss = torch.tensor([0.], device=self.device)
-            counter = 0
-            for batch_data, label in dataloader:
-                # Discriminator part
-                disc_vk = batch_data.to(self.device)
-                disc_v0 = batch_data.to(self.device)
-                disc_rk = label.unsqueeze(1).to(torch.float).to(self.device)
-                disc_r0 = label.unsqueeze(1).to(torch.float).to(self.device)
-                
-                disc_ph0, _ = self.sample_h(disc_v0, disc_r0)
-
-                for _ in range(self.k):
-                    _, disc_hk = self.sample_h(disc_vk, disc_rk)
-                    _, disc_rk = self.sample_r(disc_hk)
-                disc_phk, _ = self.sample_h(disc_vk, disc_rk)
-
-                # Generation part
-                vk = batch_data.to(self.device)
-                v0 = batch_data.to(self.device)
-                rk = label.unsqueeze(1).to(torch.float).to(self.device)
-                r0 = label.unsqueeze(1).to(torch.float).to(self.device)
-                
-                ph0, _ = self.sample_h(v0, r0)
-
-                for _ in range(self.k):
-                    _, hk = self.sample_h(vk, rk)
-                    _, vk = self.sample_v(hk)
-                    _, rk = self.sample_r(hk)
-                phk, _ = self.sample_h(vk, rk)
-                self.update(v0, vk, ph0, phk, r0, rk, epoch+1)
-                self.update(disc_v0, disc_vk, disc_ph0, disc_phk, disc_r0, disc_rk, epoch+1, discriminator=True)
-
-                train_loss += torch.mean(torch.abs(v0 - vk)) + torch.mean(torch.abs(r0 - rk)) 
-                regression_loss += torch.mean(torch.abs(r0 - disc_rk))
-                counter += 1
-
-            self.progress.append(train_loss.item()/counter)
-            self.regression_progress.append(regression_loss.item()/counter)
-            details = {"epoch": epoch+1, "loss": round(train_loss.item()/counter, 4), "regression_loss": round(regression_loss.item()/counter, 4)}
-            learning.set_description(str(details))
-            learning.refresh()
-
-            if (train_loss.item()/counter > self.previous_loss_before_stagnation and epoch>self.early_stopping_patient+1):
-                self.stagnation += 1
-                if (self.stagnation == self.early_stopping_patient-1):
-                    learning.close()
-                    print("Not Improving the stopping training loop.")
-                    break
-            else:
-                self.previous_loss_before_stagnation = train_loss.item()/counter
-                self.stagnation = 0
-            end_time = time.time()
-            print("Time taken for RBM epoch {} is {:.2f} sec".format(epoch+1, end_time-start_time))
-        learning.close()
-        if (self.savefile != None):
-            model = {"W": self.weights, "TW": self.top_weights, "hb": self.hidden_bias, "vb": self.visible_bias, "tb": self.top_bias}
-            torch.save(model, self.savefile)
-        self.visualize_training_curve()
-
-    def load_rbm(self, savefile: str):
-        """
-        Load RBM
-        """
-        model = torch.load(savefile, weights_only=False)
-        self.weights = model["W"].to(self.device)
-        self.top_weights = model["TW"].to(self.device)
-        self.hidden_bias = model["hb"].to(self.device)
-        self.visible_bias = model["vb"].to(self.device)
-        self.top_bias = model["tb"].to(self.device)
-    
-    def visualize_training_curve(self):
-        """
-        Visualize training curve
-        """
-        plot_title = "Training Curve of {}".format(self.savefile.replace(".pth", ""))
-        directory = "../results/plots/RBM/"
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-        x = np.arange(1, len(self.progress)+1)
-        plt.figure()
-        plt.plot(x, np.array(self.progress), label="Reconstruction Loss")
-        plt.plot(x, np.array(self.regression_progress), label="Regression Loss")
-        plt.title(plot_title)
-        plt.xlabel("Epoch")
-        plt.ylabel("Loss")
-        plt.legend()
-        plt.savefig(directory + plot_title.replace(" ", "_") + ".png")
-        plt.close()
-
-    def encoder(self, dataset: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
-        """
-        Generate top level latent variables
-        """
-        dataset = dataset.to(self.device)
-        p_h_given_v, _ = self.sample_h(dataset, label)
-        return p_h_given_v
-
-    def encode(self, dataloader: DataLoader) -> DataLoader:
-        """
-        Encode data
-        """
-        latent_vars = []
-        labels = []
-        for data, label in dataloader:
-            data = data.to(self.device)
-            label = label.unsqueeze(1).to(torch.float32).to(self.device)
-            latent_vars.append(self.encoder(data, label))
-            labels.append(label)
-        latent_vars = torch.cat(latent_vars, dim=0)
-        labels = torch.cat(labels, dim=0)
-        latent_dataset = TensorDataset(latent_vars, labels)
-
-        return DataLoader(latent_dataset, batch_size=self.batch_size, shuffle=False)
-    
-if __name__ == "__main__":
-    mnist = MNIST()
-    train_x, train_y, test_x, test_y = mnist.load_dataset()
-    print('MAE for all 0 selection:', torch.mean(train_x))
-    batch_size = 1000	
-    datasize = train_x.shape[0]
-    data_dimension = train_x.shape[1]
-    print("The whole dataset has {} data. The dimension of each data is {}. Batch size is {}.".format(datasize, data_dimension, batch_size))
-
-    dataset = TensorDataset(train_x, train_y)
-    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-    
-    rbm = RBM(data_dimension, num_hidden=1000, batch_size=batch_size, epochs=10, savefile="rbm.pth", bias = True, lr = 0.1, mode = "bernoulli", multinomial_sample_size = 10, k = 3, optimizer = "adam", early_stopping_patient = 5, gaussian_top = True, top_sigma = 3.*torch.ones((1,)), sigma = None, disc_alpha = 0.5)
-    rbm.train(data_loader)
-    rbm.visualize_training_curve()
-    latent_loader = rbm.encode(data_loader)
-
-    rbm_multinomial = RBM(data_dimension, num_hidden=1000, batch_size=batch_size, epochs=10, savefile="rbm.pth", bias = True, lr = 0.1, mode = "multinomial", multinomial_sample_size = 10, k = 3, optimizer = "adam", early_stopping_patient = 5, gaussian_top = True, top_sigma = 3.*torch.ones((1,)), sigma = None, disc_alpha = 0.5)
-    rbm_multinomial.train(data_loader)
-    rbm_multinomial.visualize_training_curve()
-    latent_loader_multinomial = rbm_multinomial.encode(data_loader)
-
-    latent, _ = latent_loader.dataset.tensors
-    latent_multinomial, _ = latent_loader_multinomial.dataset.tensors
-    original, labels = data_loader.dataset.tensors
-
-    latent_data = latent.cpu().numpy()
-    latent_multinomial_data = latent_multinomial.cpu().numpy()
-    true_label = labels.cpu().numpy().flatten()
-    original_data = original.cpu().numpy()
-
-    directory = "../results/plots/RBM/UMAP_new/"
-    if not os.path.exists(directory):
-        os.makedirs(directory)
+                raise ValueError("Invalid target distribution: {}".format(self.target_dist))
         
-    import numpy as np
-    from sklearn.datasets import load_digits
-    from sklearn.model_selection import train_test_split
-    from sklearn.preprocessing import StandardScaler
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    import pandas as pd
-    sns.set(style='white', context='notebook', rc={'figure.figsize':(14,10)})
-    import umap
+        if (self.latent_dist == 'bernoulli'):
+            p = expit(p, out=p)
+        elif (self.latent_dist == 'multinomial'):
+            p = softmax(p)
+        else:
+            raise ValueError("Invalid latent distribution: {}".format(self.latent_dist))
+        return p
 
+    def _sample_hiddens(self, v, t, rng):
+        """Sample from the distribution P(h|v).
 
-    digits = latent_data
-    reducer = umap.UMAP(random_state=42)
-    reducer.fit(digits)
+        Parameters
+        ----------
+        v : ndarray of shape (n_samples, n_features)
+            Values of the visible layer to sample from.
 
-    embedding = reducer.transform(digits)
-    # Verify that the result of calling transform is
-    # idenitical to accessing the embedding_ attribute
-    assert(np.all(embedding == reducer.embedding_))
-    embedding.shape        
+        rng : RandomState instance
+            Random number generator to use.
 
-    new_dir = directory
-    if not os.path.exists(new_dir):
-        os.makedirs(new_dir)
-    plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
-    plt.gca().set_aspect('equal', 'datalim')
-    plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
-    plt.title('UMAP projection of the Digits dataset with final latent embedding Ground Truth', fontsize=24)
-    plt.savefig(new_dir+"final_latent_embedding.png")
-    plt.close()
+        Returns
+        -------
+        h : ndarray of shape (n_samples, n_components)
+            Values of the hidden layer.
+        """
+        p = self._mean_hiddens(v, t)
+        if (self.latent_dist == 'bernoulli'):
+            samples = rng.uniform(size=p.shape) < p
+        elif (self.latent_dist == 'multinomial'):
+            samples = [rng.multinomial(self.sample_size, pval) for pval in p]
+            samples = np.array(samples)
+        else:
+            raise ValueError("Invalid latent distribution: {}".format(self.latent_dist))
+        return samples
 
-    digits = latent_multinomial_data
-    reducer = umap.UMAP(random_state=42)
-    reducer.fit(digits)
+    def _mean_visibles(self, h):
+        """Computes the probabilities P(v=1|h).
 
-    embedding = reducer.transform(digits)
-    # Verify that the result of calling transform is
-    # idenitical to accessing the embedding_ attribute
-    assert(np.all(embedding == reducer.embedding_))
-    embedding.shape        
+        Parameters
+        ----------
+        h : ndarray of shape (n_samples, n_components)
+            Values of the hidden layer.
 
-    plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
-    plt.gca().set_aspect('equal', 'datalim')
-    plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
-    plt.title('UMAP projection of the Digits dataset with multinomial latent embedding Ground Truth', fontsize=24)
-    plt.savefig(new_dir+"multinomial_embedding.png")
-    plt.close()
+        Returns
+        -------
+        v : ndarray of shape (n_samples, n_features)
+            Corresponding mean field values for the visible layer.
+        """
+        p = np.dot(h, self.components_)
+        if (self.input_dist == 'gaussian'):
+            p *= self.sigma
+            if (self.add_bias):
+                p += self.intercept_visible_
+        elif (self.input_dist == 'bernoulli'):
+            if (self.add_bias):
+                p += self.intercept_visible_
+            p = expit(p, out=p)
+        else:
+            raise ValueError("Invalid input distribution: {}".format(self.input_dist))
 
-    digits = original_data
-    reducer = umap.UMAP(random_state=42)
-    reducer.fit(digits)
+        return p
+    
+    def _sample_visibles(self, h, rng):
+        """Sample from the distribution P(v|h).
 
-    embedding = reducer.transform(digits)
-    # Verify that the result of calling transform is
-    # idenitical to accessing the embedding_ attribute
-    assert(np.all(embedding == reducer.embedding_))
-    embedding.shape        
+        Parameters
+        ----------
+        h : ndarray of shape (n_samples, n_components)
+            Values of the hidden layer to sample from.
 
-    plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
-    plt.gca().set_aspect('equal', 'datalim')
-    plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
-    plt.title('UMAP projection of the Digits dataset with original data Ground Truth', fontsize=24)
-    plt.savefig(new_dir+"original_data.png")
-    plt.close()
+        rng : RandomState instance
+            Random number generator to use.
 
-    # for final_level, original in zip(latent_loader, data_loader):
-    #     # Initialize KMeans and fit to the data
-    #     data = final_level[0]
-    #     concatenated_data = torch.sum(data, dim = 1).cpu().numpy()
-    #     true_label = final_level[1].cpu().numpy().flatten()
-    #     original_data = original[0].cpu().numpy()
-    #     # print("first level data shape: ", first_level_data.shape)  
-    #     # print("second level data shape: ", second_level_data.shape)
-    #     # print("concatenated data shape: ", concatenated_data.shape)
-    #     # kmeans = KMeans(n_clusters=10)
-    #     # kmeans.fit(concatenated_data)
+        Returns
+        -------
+        v : ndarray of shape (n_samples, n_features)
+            Values of the visible layer.
+        """
+        p = self._mean_visibles(h)
+        if (self.input_dist == 'gaussian'):
+            samples = rng.normal(p, self.sigma, size=p.shape)
+        elif (self.input_dist == 'bernoulli'):
+            samples = rng.uniform(size=p.shape) < p
+        else:
+            raise ValueError("Invalid input distribution: {}".format(self.input_dist))
+        return samples
 
-    #     # # Get the cluster centers and labels
-    #     # centers = kmeans.cluster_centers_
-    #     # labels = kmeans.labels_
+    def _mean_targets(self, h):
+        """Computes the probabilities P(t|h).
 
-    #     # unique_values, indices, counts = np.unique(true_label, return_index=True, return_counts=True)
-    #     # for i in unique_values:
-    #     #     print("For number {}".format(i))
-    #     #     # print("Predicted labels")
-    #     #     predicted_labels = labels[np.where(true_label == i)]
-    #     #     pred_values, pred_indices, pred_counts = np.unique(predicted_labels, return_index=True, return_counts=True)
-    #     #     # print(labels[np.where(true_label == i)])
-    #     #     print("Predicted category: {}, Predict counts: {}".format(pred_values, pred_counts))
+        Parameters
+        ----------
+        h : ndarray of shape (n_samples, n_components)
+            Values of the hidden layer.
 
-    #     # directory = "../results/plots/DBM/Clusters/"
-    #     # if not os.path.exists(directory):
-    #     #     os.makedirs(directory)
-    #     # for im, tl in zip(concatenated_data, true_label):
-    #     #     print("True label: ", tl)
-    #     #     plt.imshow(im.reshape(10, 10), cmap='gray')
-    #     #     new_directory = directory+"true_label_{}/".format(tl)
-    #     #     if not os.path.exists(new_directory):
-    #     #         os.makedirs(new_directory)
-    #     #     # plt.savefig(new_directory + "{}.png".format(image_index))
-    #     #      # image_index += 1
-    #     #     plt.show()
+        Returns
+        -------
+        t : ndarray of shape (n_samples, n_targets)
+            Corresponding mean field values for the target layer.
+        """
+        p = np.dot(h, self.target_components_.T)
+        if (self.target_dist == 'gaussian'):
+            p *= self.target_sigma
+            if (self.add_bias):
+                p += self.intercept_target_
+        elif (self.target_dist == 'bernoulli'):
+            if (self.add_bias):
+                p += self.intercept_target_
+            p = expit(p, out=p)
+        else:
+            raise ValueError("Invalid target distribution: {}".format(self.target_dist))
+        return p
+    
+    def _sample_targets(self, h, rng):
+        """Sample from the distribution P(t|h).
+
+        Parameters
+        ----------
+        h : ndarray of shape (n_samples, n_components)
+            Values of the hidden layer to sample from.
+
+        rng : RandomState instance
+            Random number generator to use.
+
+        Returns
+        -------
+        t : ndarray of shape (n_samples, n_targets)
+            Values of the target layer.
+        """
+        p = self._mean_targets(h)
+        if (self.target_dist == 'bernoulli'):
+            samples = rng.uniform(size=p.shape) < p
+        elif (self.target_dist == 'gaussian'):
+            samples = rng.normal(p, self.target_sigma, size=p.shape)
+        else:
+            raise ValueError("Invalid target distribution: {}".format(self.target_dist))
+        return samples
+    
+    def _free_energy(self, v, t):
+        """Computes the free energy F(v) = - log sum_h exp(-E(v,h)).
+
+        Parameters
+        ----------
+        v : ndarray of shape (n_samples, n_features)
+            Values of the visible layer.
+
+        Returns
+        -------
+        free_energy : ndarray of shape (n_samples,)
+            The value of the free energy.
+        """
+        if (self.add_bias and self.input_dist == 'gaussian'):
+            input_energy = np.sum(((v - self.intercept_visible_) / self.sigma) ** 2, axis=1) - np.logaddexp(0, safe_sparse_dot(v/(self.sigma ** 2), self.components__.T) + self.intercept_hidden_).sum(axis=1)
+        elif (self.add_bias and self.input_dist == 'bernoulli'):
+            input_energy = -safe_sparse_dot(v, self.intercept_visible_) - np.logaddexp(0, safe_sparse_dot(v, self.components_.T) + self.intercept_hidden_).sum(axis=1)
+        elif (self.input_dist == 'gaussian'):
+            input_energy = np.sum((v / self.sigma) ** 2, axis=1) - np.logaddexp(0, safe_sparse_dot(v/(self.sigma ** 2), self.components__.T)).sum(axis=1)
+        elif (self.input_dist == 'bernoulli'):
+            input_energy = - np.logaddexp(0, safe_sparse_dot(v, self.components_.T)).sum(axis=1)
+        else:
+            raise ValueError("Invalid input distribution: {}".format(self.input_dist))
+        
+        if (self.target_in_model):
+            if (self.add_bias and self.target_dist == 'gaussian'):
+                target_energy = np.sum(((t - self.intercept_target_) / self.target_sigma) ** 2, axis=1) - np.logaddexp(0, safe_sparse_dot(t/(self.target_sigma ** 2), self.target_components__) + self.intercept_hidden_).sum(axis=1)
+            elif (self.add_bias and self.target_dist == 'bernoulli'):
+                target_energy = -safe_sparse_dot(t, self.intercept_target_) - np.logaddexp(0, safe_sparse_dot(t, self.target_components_) + self.intercept_hidden_).sum(axis=1)
+            elif (self.target_dist == 'gaussian'):
+                target_energy = np.sum((t / self.target_sigma) ** 2, axis=1) - np.logaddexp(0, safe_sparse_dot(t/(self.target_sigma ** 2), self.target_components__)).sum(axis=1)
+            elif (self.target_dist == 'bernoulli'):
+                target_energy = - np.logaddexp(0, safe_sparse_dot(t, self.target_components_)).sum(axis=1)
+            else:
+                raise ValueError("Invalid target distribution: {}".format(self.target_dist))
+        else:
+            target_energy = 0.
+        return input_energy + target_energy
+
+    def gibbs(self, v, t):
+        """Perform one Gibbs sampling step.
+
+        Parameters
+        ----------
+        v : ndarray of shape (n_samples, n_features)
+            Values of the visible layer to start from.
+
+        Returns
+        -------
+        v_new : ndarray of shape (n_samples, n_features)
+            Values of the visible layer after one Gibbs step.
+        """
+        check_is_fitted(self)
+        if not hasattr(self, "random_state_"):
+            self.random_state_ = check_random_state(self.random_state)
+        h_ = self._sample_hiddens(v, t, self.random_state_)
+        v_ = self._sample_visibles(h_, self.random_state_)
+        t_ = self._sample_targets(h_, self.random_state_)
+
+        return v_, t_
+
+    @_fit_context(prefer_skip_nested_validation=True)
+    def partial_fit(self, X, y=None):
+        """Fit the model to the partial segment of the data X.
+
+        Parameters
+        ----------
+        X : ndarray of shape (n_samples, n_features)
+            Training data.
+
+        y : array-like of shape (n_samples,) or (n_samples, n_outputs), default=None
+            Target values (None for unsupervised transformations).
+
+        Returns
+        -------
+        self : BernoulliRBM
+            The fitted model.
+        """
+        first_pass = not hasattr(self, "components_")
+        X = self._validate_data(
+            X, accept_sparse="csr", dtype=np.float64, reset=first_pass
+        )
+        if not hasattr(self, "random_state_"):
+            self.random_state_ = check_random_state(self.random_state)
+        if not hasattr(self, "components_"):
+            self.components_ = np.asarray(
+                self.random_state_.normal(0, 0.01, (self.n_components, X.shape[1])),
+                order="F",
+            )
+            self._n_features_out = self.components_.shape[0]
+        if not hasattr(self, "intercept_hidden_"):
+            self.intercept_hidden_ = np.zeros(
+                self.n_components,
+            )
+        if not hasattr(self, "intercept_visible_"):
+            self.intercept_visible_ = np.zeros(
+                X.shape[1],
+            )
+        if not hasattr(self, "h_samples_"):
+            self.h_samples_ = np.zeros((self.batch_size, self.n_components))
+
+        self._fit(X, y, self.random_state_)
+
+    def _fit(self, v_pos, t_pos, rng):
+        """Inner fit for one mini-batch.
+
+        Adjust the parameters to maximize the likelihood of v using
+        Stochastic Maximum Likelihood (SML).
+
+        Parameters
+        ----------
+        v_pos : ndarray of shape (n_samples, n_features)
+            The data to use for training.
+
+        rng : RandomState instance
+            Random number generator to use for sampling.
+        """
+        h_pos = self._mean_hiddens(v_pos, t_pos)
+        v_neg = self._sample_visibles(self.h_samples_, rng)
+        t_neg = self._sample_targets(self.h_samples_, rng)
+        h_neg = self._mean_hiddens(v_neg, t_neg)
         
 
-    #     # Assuming X is your 100-dimensional data and y_kmeans are the cluster labels
-    #     # Reduce to 2D with PCA
-    #     # pca = PCA(n_components=2)
-    #     # X_pca = pca.fit_transform(concatenated_data)
+        lr = float(self.learning_rate) / v_pos.shape[0]
+        update = safe_sparse_dot(v_pos.T, h_pos, dense_output=True).T
+        update -= np.dot(h_neg.T, v_neg)
+        self.components_ += lr * update
+        self.intercept_hidden_ += lr * (h_pos.sum(axis=0) - h_neg.sum(axis=0))
+        self.intercept_visible_ += lr * (
+            np.asarray(v_pos.sum(axis=0)).squeeze() - v_neg.sum(axis=0)
+        )
 
-    #     # # Plot the 2D projection with cluster labels
-    #     # plt.scatter(X_pca[:, 0], X_pca[:, 1], c=labels, cmap='viridis', s=50)
-    #     # plt.title('KMeans Clustering with PCA (2D projection)')
-    #     # plt.xlabel('PCA Component 1')
-    #     # plt.ylabel('PCA Component 2')
-    #     # plt.show()
+        if (self.target_in_model):
+            target_lr = lr/100.
+            update_target = safe_sparse_dot(h_pos.T, t_pos/self.target_sigma, dense_output=True).T
+            update_target -= np.dot(h_neg.T, t_neg/self.target_sigma).T
+            self.target_components_ += target_lr * update_target
+            self.intercept_target_ += target_lr * (np.sum(t_pos/(self.target_sigma**2), axis=0) - np.sum(t_neg/(self.target_sigma**2), axis=0))
 
-    #     # plt.scatter(X_pca[:, 0], X_pca[:, 1], c=true_label, cmap='viridis', s=50)
-    #     # plt.title('Ground truth with PCA (2D projection)')
-    #     # plt.xlabel('PCA Component 1')
-    #     # plt.ylabel('PCA Component 2')
-    #     # plt.show()    
-    #     # plt.close()    
+        if (self.latent_dist == 'multinomial'):
+            self.h_samples_ = [rng.multinomial(self.sample_size, pval) for pval in h_neg]
+            self.h_samples_ = np.array(self.h_samples_)
+        elif (self.latent_dist == 'bernoulli'):
+            h_neg[rng.uniform(size=h_neg.shape) < h_neg] = 1.0  # sample binomial
+            self.h_samples_ = np.floor(h_neg, h_neg)
+        else:
+            raise ValueError("Invalid latent distribution: {}".format(self.latent_dist))
 
+    def score_samples(self, X, y):
+        """Compute the pseudo-likelihood of X.
 
-    #     import numpy as np
-    #     from sklearn.datasets import load_digits
-    #     from sklearn.model_selection import train_test_split
-    #     from sklearn.preprocessing import StandardScaler
-    #     import matplotlib.pyplot as plt
-    #     import seaborn as sns
-    #     import pandas as pd
-    #     sns.set(style='white', context='notebook', rc={'figure.figsize':(14,10)})
-    #     import umap
+        Parameters
+        ----------
+        X : {array-like, sparse matrix} of shape (n_samples, n_features)
+            Values of the visible layer. Must be all-boolean (not checked).
 
+        Returns
+        -------
+        pseudo_likelihood : ndarray of shape (n_samples,)
+            Value of the pseudo-likelihood (proxy for likelihood).
 
-    #     digits = concatenated_data
-    #     reducer = umap.UMAP(random_state=42)
-    #     reducer.fit(digits)
+        Notes
+        -----
+        This method is not deterministic: it computes a quantity called the
+        free energy on X, then on a randomly corrupted version of X, and
+        returns the log of the logistic function of the difference.
+        """
+        check_is_fitted(self)
 
-    #     embedding = reducer.transform(digits)
-    #     # Verify that the result of calling transform is
-    #     # idenitical to accessing the embedding_ attribute
-    #     assert(np.all(embedding == reducer.embedding_))
-    #     embedding.shape        
+        v = self._validate_data(X, accept_sparse="csr", reset=False)
+        t = self._validate_data(y, accept_sparse="csr", reset=False)
+        rng = check_random_state(self.random_state)
 
-    #     new_dir = directory+"image_{}/".format(image_index)
-    #     if not os.path.exists(new_dir):
-    #         os.makedirs(new_dir)
-    #     plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
-    #     plt.gca().set_aspect('equal', 'datalim')
-    #     plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
-    #     plt.title('UMAP projection of the Digits dataset with multinomial final latent embedding Ground Truth', fontsize=24)
-    #     plt.savefig(new_dir+"final_latent_embedding_multinomial.png")
-    #     plt.close()
-    #     image_index += 1
+        # Randomly corrupt one feature in each sample in v.
+        ind = (np.arange(v.shape[0]), rng.randint(0, v.shape[1], v.shape[0]))
+        if sp.issparse(v):
+            data = -2 * v[ind] + 1
+            if isinstance(data, np.matrix):  # v is a sparse matrix
+                v_ = v + sp.csr_matrix((data.A.ravel(), ind), shape=v.shape)
+            else:  # v is a sparse array
+                v_ = v + sp.csr_array((data.ravel(), ind), shape=v.shape)
+        else:
+            v_ = v.copy()
+            v_[ind] = 1 - v_[ind]
+
+        fe = self._free_energy(v, t)
+        fe_ = self._free_energy(v_, t)
+        # log(expit(x)) = log(1 / (1 + exp(-x)) = -np.logaddexp(0, -x)
+        return -v.shape[1] * np.logaddexp(0, -(fe_ - fe))
+
+    @_fit_context(prefer_skip_nested_validation=True)
+    def fit(self, X, y, sample_size=100):
+        """Fit the model to the data X.
+
+        Parameters
+        ----------
+        X : {array-like, sparse matrix} of shape (n_samples, n_features)
+            Training data.
+
+        y : array-like of shape (n_samples,) or (n_samples, n_outputs).
+
+        Returns
+        -------
+        self : BernoulliRBM
+            The fitted model.
+        """
+        X = self._validate_data(X, accept_sparse="csr", dtype=(np.float64, np.float32))
+        y = self._validate_data(y, accept_sparse="csr", dtype=(np.float64, np.float32))
+        n_samples = X.shape[0]
+        
+        rng = check_random_state(self.random_state)
+
+        self.sample_size = sample_size
+        self.components_ = np.asarray(
+            rng.normal(0, 0.01, (self.n_components, X.shape[1])),
+            order="F",
+            dtype=X.dtype,
+        )
+        self.sigma = 0.5
+        self.target_sigma = 0.5
+        self.target_components_ = np.asarray(
+            rng.normal(0, 0.01, (y.shape[1], self.n_components)),
+            order="F",
+            dtype=y.dtype,
+        )
+            
+        self.intercept_target_ = np.zeros(y.shape[1], dtype=y.dtype)
+        self._n_features_out = self.components_.shape[0]
+        self.intercept_hidden_ = np.zeros(self.n_components, dtype=X.dtype)
+        self.intercept_visible_ = np.zeros(X.shape[1], dtype=X.dtype)
+        self.h_samples_ = np.zeros((self.batch_size, self.n_components), dtype=X.dtype)
+
+        n_batches = int(np.ceil(float(n_samples) / self.batch_size))
+        batch_slices = list(
+            gen_even_slices(n_batches * self.batch_size, n_batches, n_samples=n_samples)
+        )
+        verbose = self.verbose
+        begin = time.time()
+        for iteration in range(1, self.n_iter + 1):
+            for batch_slice in batch_slices:
+                self._fit(X[batch_slice], y[batch_slice], rng)
+
+            if verbose:
+                end = time.time()
+                print(
+                    "[%s] Iteration %d, pseudo-likelihood = %.2f, time = %.2fs"
+                    % (
+                        type(self).__name__,
+                        iteration,
+                        self.score_samples(X).mean(),
+                        end - begin,
+                    )
+                )
+                begin = end
+
+        return self
+
+    def fit_dataloader(self, dataloader, v_dim, t_dim, sample_size=100, hybrid_alpha=1.):
+        """Fit the model to the data X.
+
+        Parameters
+        ----------
+        X : {array-like, sparse matrix} of shape (n_samples, n_features)
+            Training data.
+
+        y : array-like of shape (n_samples,) or (n_samples, n_outputs).
+
+        Returns
+        -------
+        self : BernoulliRBM
+            The fitted model.
+        """
+        rng = check_random_state(self.random_state)
+
+        self.sample_size = sample_size
+        self.hybrid_alpha = hybrid_alpha
+        self.components_ = np.asarray(
+            rng.normal(0, 0.01, (self.n_components, v_dim)),
+            order="F",
+            dtype=np.float32,
+        )
+        self.sigma = 0.1
+        self.target_sigma = 0.1
+        self.target_components_ = np.asarray(
+            rng.normal(0, 0.01, (t_dim, self.n_components)),
+            order="F",
+            dtype=np.float32,
+        )
+            
+        self.intercept_target_ = np.zeros(t_dim, dtype=np.float32)
+        self._n_features_out = self.components_.shape[0]
+        self.intercept_hidden_ = np.zeros(self.n_components, dtype=np.float32)
+        self.intercept_visible_ = np.zeros(v_dim, dtype=np.float32)
+        self.h_samples_ = np.zeros((dataloader.batch_size, self.n_components), dtype=np.float32)
+
+        verbose = self.verbose
+        begin = time.time()
+        for iteration in range(1, self.n_iter + 1):
+            for X, y in dataloader:
+                X = X.detach().cpu().numpy()
+                y = y.detach().cpu().numpy().reshape(-1, t_dim)
+                self._fit(X, y, rng)
+
+            if verbose:
+                end = time.time()
+                print(
+                    "[%s] Iteration %d, pseudo-likelihood = %.2f, time = %.2fs"
+                    % (
+                        type(self).__name__,
+                        iteration,
+                        self.score_samples(X).mean(),
+                        end - begin,
+                    )
+                )
+                begin = end
+
+        return self
+    
+    def _more_tags(self):
+        return {
+            "_xfail_checks": {
+                "check_methods_subset_invariance": (
+                    "fails for the decision_function method"
+                ),
+                "check_methods_sample_order_invariance": (
+                    "fails for the score_samples method"
+                ),
+            },
+            "preserves_dtype": [np.float64, np.float32],
+        }

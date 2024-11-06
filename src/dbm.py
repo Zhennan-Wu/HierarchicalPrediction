@@ -3,7 +3,7 @@ import os
 import time
 from typing import Any, Union, List, Tuple, Dict
 from dbn import DBN
-from rbm import RBM
+from rbm_old import RBM
 import numpy as np
 from tqdm import trange
 from torch.utils.data import DataLoader, TensorDataset
@@ -16,63 +16,16 @@ import matplotlib.pyplot as plt
 from load_dataset import MNIST
 
 
-class DBM:
+class DBM(DBN):
     """
     Deep Boltzmann Machine
     """
-    def __init__(self, input_size: int, layers: list, batch_size: int, epochs: int = 100, savefile: str = None, mode: str = "bernoulli", multinomial_top: bool=False, multinomial_sample_size: int = 0, bias: bool = False, k: int = 5, early_stopping_patient: int = 20, gaussian_top: bool = False, top_sigma: torch.Tensor = None, sigma: torch.Tensor = None, disc_alpha: float = 0.):
-        if (torch.cuda.is_available()):
-            self.device = torch.device("cuda")
-        else:
-            self.device = torch.device("cpu")
-        # self.device = torch.device("cpu")
-        self.input_size = input_size
-        self.layers = layers
-        self.bias = bias
-        self.batch_size = batch_size
-        self.layer_parameters = [{"W":None, "hb":None, "vb": None} for _ in range(len(layers))]
-        self.top_parameters = {"W":None, "hb":None, "vb": None}
+    def __init__(self, input_size: int, layers: list, batch_size: int, epochs: int = 100, savefile: str = None, mode: str = "bernoulli", multinomial_top: bool=False, multinomial_sample_size: int = 0, bias: bool = False, k: int = 5, gaussian_top: bool = False, top_sigma: torch.Tensor = None, sigma: torch.Tensor = None, disc_alpha: float = 1.):
+        super().__init__(input_size, layers, batch_size, epochs, savefile, mode, multinomial_top, multinomial_sample_size, bias, k, gaussian_top, top_sigma, sigma, disc_alpha)
         self.layer_mean_field_parameters = [{"mu":None} for _ in range(len(layers))]
-        self.k = k
-        self.mode = mode
-        self.savefile = savefile
-        self.epochs = epochs
-        self.multinomial_top = multinomial_top
-        self.gaussian_top = gaussian_top
-        if (top_sigma == None):
-            self.top_sigma = torch.ones((1,), dtype = torch.float32, device=self.device)
-        else:
-            self.top_sigma = top_sigma.to(torch.float32).to(self.device)
-        if (sigma == None):
-            self.sigma = torch.ones((input_size,), dtype = torch.float32, device=self.device)
-        else:
-            self.sigma = sigma.to(torch.float32).to(self.device)
-        self.disc_alpha = disc_alpha
-        self.multinomial_sample_size = multinomial_sample_size
-        self.early_stopping_patient = early_stopping_patient
-        self.stagnation = 0
-        self.previous_loss_before_stagnation = 0
         self.regression_progress = []
         self.progress = []
-
-    def sample_v(self, layer_index: int, y: torch.Tensor) -> torch.Tensor:
-        """
-        Sample visible units given hidden units
-        """
-        W = self.layer_parameters[layer_index]["W"]
-        vb = self.layer_parameters[layer_index]["vb"]
-        activation = torch.matmul(y, W) + vb
-        if (self.mode == "bernoulli"):
-            p_v_given_h = torch.sigmoid(activation) 
-            variable = torch.bernoulli(p_v_given_h)    
-        elif (self.mode == "gaussian"):
-            mean = activation * self.sigma
-            gaussian_dist = torch.distributions.normal.Normal(mean, self.sigma)
-            variable = gaussian_dist.sample()
-            p_v_given_h = torch.exp(gaussian_dist.log_prob(variable))
-        else:
-            raise ValueError("Invalid mode")
-        return p_v_given_h, variable
+        self.savefile = savefile
     
     def sample_h(self, layer_index: int, x_bottom: torch.Tensor, x_top: torch.Tensor = None) -> torch.Tensor:
         """
@@ -82,21 +35,19 @@ class DBM:
         b_bottom = self.layer_parameters[layer_index]["hb"]
         if (layer_index == len(self.layers)-1):
             W_top = self.top_parameters["W"]
-            b_top = self.top_parameters["vb"]
         else:
             W_top = self.layer_parameters[layer_index+1]["W"]
-            b_top = self.layer_parameters[layer_index+1]["vb"]
         if (x_top is not None):
             x_top = x_top.to(self.device)
         else:
             x_top = torch.zeros((1, W_top.size(0)), device=self.device)
 
         if (layer_index == 0):
-            activation = torch.matmul(x_bottom/self.sigma, W_bottom.t()) + b_bottom + torch.matmul(x_top, W_top) + b_top
+            activation = torch.matmul(x_bottom/self.sigma**2, W_bottom.t()) + b_bottom + torch.matmul(x_top, W_top)
         elif (layer_index == len(self.layers)-1):
-            activation = torch.matmul(x_bottom, W_bottom.t()) + torch.matmul(x_top/self.top_sigma, W_top) + b_bottom + b_top
+            activation = torch.matmul(x_bottom, W_bottom.t()) + torch.matmul(x_top/self.top_sigma**2, W_top) + b_bottom 
         else:
-            activation = torch.matmul(x_bottom, W_bottom.t()) + torch.matmul(x_top, W_top) + b_bottom + b_top
+            activation = torch.matmul(x_bottom, W_bottom.t()) + torch.matmul(x_top, W_top) + b_bottom 
 
         if (layer_index == len(self.layers)-1 and self.multinomial_top):
             p_h_given_v = torch.softmax(activation, dim=1)
@@ -107,20 +58,6 @@ class DBM:
             p_h_given_v = torch.sigmoid(activation)
             variables = torch.bernoulli(p_h_given_v)
         return p_h_given_v, variables
-    
-    def sample_r(self, x_bottom: torch.Tensor) -> torch.Tensor:
-        """
-        Sample reconstruction
-        """
-        if (self.gaussian_top):
-            mean = (torch.mm(x_bottom, self.top_parameters["W"].t()) + self.top_parameters["hb"])*self.top_sigma
-            gaussian_dist = torch.distributions.normal.Normal(mean, self.sigma)
-            variable = gaussian_dist.sample()
-            p_r_given_h = torch.exp(gaussian_dist.log_prob(variable))
-        else:
-            p_r_given_h = torch.ones((self.batch_size, 1), dtype=torch.float32, device=self.device)
-            variable = torch.ones((self.batch_size, 1), dtype=torch.float32, device=self.device)
-        return p_r_given_h, variable
         
     def generate_input_for_layer(self, index: int, dataset: torch.Tensor) -> torch.Tensor:
         """
@@ -139,63 +76,6 @@ class DBM:
             x_dash = torch.mean(x_dash, dim=0)
             return x_dash
         
-    def pre_train(self, dataloader: DataLoader, savefile: str = None):
-        """
-        Train DBM
-        """
-        # duplicate input for k-step contrastive divergence
-        input_layer = []
-        input_labels = []
-        for batch, label in dataloader:
-            repeated_batch = []
-            for _ in range(self.k):
-                repeated_batch.append(batch)
-            input_layer.append(input_batch)
-            input_labels.append(label)
-        hidden_labels = torch.cat(input_labels)
-
-        for index, _ in enumerate(self.layers):
-            if (index == 0):
-                vn = self.input_size
-            else:
-                vn = self.layers[index-1]
-            hn = self.layers[index]
-
-            if (index == len(self.layers)-1):
-                if (self.multinomial_top):
-                    mode = "multinomial"
-            else:
-                mode = self.mode
-            rbm = RBM(vn, hn, self.batch_size, epochs=self.epochs, savefile = "{}th layer_rbm.pth".format(index+1), bias = False, lr=0.0005, mode=mode, multinomial_sample_size=self.multinomial_sample_size, k=10, optimizer="adam", early_stopping_patient=10, gaussian_top=self.gaussian_top, top_sigma = self.top_sigma, sigma=self.sigma, disc_alpha=self.disc_alpha)
-
-            hidden_batch = []
-            for input_batch in input_layer:
-                hidden_batch.append(torch.mean(torch.stack(input_batch), dim=0))
-            hidden_data = torch.cat(hidden_batch)
-            hidden_loader = DataLoader(TensorDataset(hidden_data, hidden_labels), batch_size=self.batch_size, shuffle=False)
-
-            rbm.train(hidden_loader)
-            self.layer_parameters[index]["W"] = rbm.weights
-            self.layer_parameters[index]["hb"] = rbm.hidden_bias
-            self.layer_parameters[index]["vb"] = rbm.visible_bias
-            self.top_parameters["W"] = rbm.top_weights
-            self.top_parameters["hb"] = rbm.top_bias
-            self.top_parameters["vb"] = rbm.hidden_bias
-
-            # generate next layer input
-            new_input_layer = []
-            for input_batch in input_layer:
-                new_repeated_batch = []
-                for x in input_batch:
-                    _, var = self.sample_h(index, x)
-                    new_repeated_batch.append(var)
-                new_input_layer.append(new_repeated_batch)
-            input_layer = new_input_layer
-            print("Finished Training Layer", index, "to", index+1)
-
-        if (savefile is not None):
-            self.save_model(savefile)
-    
     def load_model(self, savefile: str):
         """
         Load DBN or DBM model
@@ -270,7 +150,7 @@ class DBM:
         new_mcmc = [[] for _ in range(len(self.layers)+2)]
         if (discriminator):
             for variables in dataloader:
-                pre_updated_variables = variables
+                pre_updated_variables = [var.to(self.device) for var in variables]
                 for _ in range(gibbs_iterations):
                     new_variables = []
                     for index in range(len(self.layers)+2):
@@ -291,7 +171,7 @@ class DBM:
                 new_tensor_variables.append(torch.cat(variable))
         else:
             for variables in dataloader:
-                pre_updated_variables = variables
+                pre_updated_variables = [var.to(self.device) for var in variables]
                 for _ in range(gibbs_iterations):
                     new_variables = []
                     for index in range(len(self.layers)+2):
@@ -390,6 +270,82 @@ class DBM:
         plt.legend()
         plt.savefig(directory + plot_title.replace(" ", "_") + ".png")
         plt.close()
+
+    def calc_mf_posteriors(self, dataloader: DataLoader, gibbs_iterations: int=50, mf_maximum_steps: int=300, mf_threshold: float=0.1, convergence_consecutive_hits: int=3):
+        """
+        Train DBM
+        """
+        # Initialize mean field parameters
+        variables = [[] for _ in range(len(self.layers)+2)]
+        for data, label in dataloader:
+            for index in range(len(self.layers)+2):
+                if (index == 0):
+                    variables[index].append(data)
+                elif (index == len(self.layers)+1):
+                    variables[index].append(label.to(torch.float32).unsqueeze(1))
+                else:
+                    variables[index].append(self.generate_input_for_layer(index, data))
+        
+        tensor_variables = []
+        for variable in variables:
+            tensor_variables.append(torch.cat(variable))
+        mcmc_loader = DataLoader(TensorDataset(*tensor_variables), batch_size=self.batch_size, shuffle=False)
+
+        disc_loader = DataLoader(TensorDataset(*tensor_variables), batch_size=self.batch_size, shuffle=False)
+
+        # Mean field updates
+        mf_posteriors = []
+        for index, _ in enumerate(self.layers):
+            mf_posteriors.append([])
+        with torch.no_grad():
+            mcmc_loader = self.gibbs_update_dataloader(mcmc_loader, gibbs_iterations)
+            disc_loader = self.gibbs_update_dataloader(disc_loader, gibbs_iterations, discriminator=True)
+
+            for dataset, mcmc_samples, disc_samples in zip(dataloader, mcmc_loader, disc_loader):
+                elbos = []
+                label = dataset[1].unsqueeze(1).to(torch.float32).to(self.device)
+                dataset = dataset[0].to(self.device)
+                mcmc_samples = [sample.to(self.device) for sample in mcmc_samples]
+                disc_samples = [sample.to(self.device) for sample in disc_samples]
+                for index, _ in enumerate(self.layers):
+                    unnormalized_mf_param = torch.rand((self.batch_size, self.layers[index]), device = self.device)
+                    self.layer_mean_field_parameters[index]["mu"] = unnormalized_mf_param/torch.sum(unnormalized_mf_param, dim=1).unsqueeze(1)
+                mf_step = 0
+                mf_convergence_count = [0]*len(self.layers)
+                mf_difference = {k: [] for k in range(len(self.layers))}
+                while (mf_step < mf_maximum_steps):
+                    for index, _ in enumerate(self.layers):
+                        old_mu = self.layer_mean_field_parameters[index]["mu"]
+                        if (index == len(self.layers)-1):
+                            activation = torch.matmul(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"].t()) + torch.matmul(label/self.top_sigma, self.top_parameters["W"])
+
+                        elif (index == 0):
+                            activation = torch.matmul(dataset/self.sigma, self.layer_parameters[index]["W"].t())+ torch.matmul(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"])
+
+                        else:
+                            activation = torch.matmul(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"].t()) + torch.matmul(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"])
+
+                        self.layer_mean_field_parameters[index]["mu"] = torch.sigmoid(activation)
+                        if ((self.layer_mean_field_parameters[index]["mu"] < 0).any()):
+                            print(activation)
+                            raise ValueError("Negative Mean Field Parameters")
+
+                        new_diff = torch.max(torch.abs(old_mu - self.layer_mean_field_parameters[index]["mu"])).item()
+                        mf_difference[index].append(new_diff)
+                        if (new_diff < mf_threshold):
+                            mf_convergence_count[index] += 1
+                        else:
+                            mf_convergence_count[index] -=1
+                    elbos.append(self.calc_ELBO(dataset))
+                    mf_step += 1
+                    if (all(x > convergence_consecutive_hits for x in mf_convergence_count)):
+                        print("Mean Field Converged with {} iterations".format(mf_step))
+                        break
+                for index in range(len(self.layers)):
+                    mf_posteriors[index].append(self.layer_mean_field_parameters[index]["mu"])
+        for index in range(len(self.layers)):
+            mf_posteriors[index] = torch.cat(mf_posteriors[index])
+        return mf_posteriors
 
     def train(self, dataloader: DataLoader, gibbs_iterations: int=50, mf_maximum_steps: int=300, mf_threshold: float=0.1, convergence_consecutive_hits: int=3):
         """
@@ -530,16 +486,6 @@ class DBM:
                 details = {"epoch": epoch+1, "loss": round(train_loss.item()/counter, 4), "regression_loss": round(regression_loss.item()/counter, 4)}
                 learning.set_description(str(details))
                 learning.refresh()    
-
-                # if (train_loss.item()/counter > self.previous_loss_before_stagnation and epoch>self.early_stopping_patient+1):
-                #     self.stagnation += 1
-                #     if (self.stagnation == self.early_stopping_patient-1):
-                #         learning.close()
-                #         print("Not Improving the stopping training loop.")
-                #         break
-                # else:
-                #     self.previous_loss_before_stagnation = train_loss.item()/counter
-                #     self.stagnation = 0
                 
                 end_time = time.time()
                 print("Time taken for DBM epoch {} is {}".format(epoch, end_time-start_time))
@@ -628,7 +574,7 @@ class DBM:
             x_bottom = self.generate_input_for_layer(depth-1, dataset)
             W_bottom = self.layer_parameters[-1]["W"].to(self.device)
             b_bottom = self.layer_parameters[-1]["hb"].to(self.device)
-            activation = torch.matmul(x_bottom, W_bottom.t()) + b_bottom + (torch.matmul(label, self.top_parameters["W"].to(self.device)) + self.top_parameters["hb"].to(self.device))/self.top_sigma
+            activation = torch.matmul(x_bottom, W_bottom.t()) + b_bottom + torch.matmul(label/self.top_sigma**2, self.top_parameters["W"].to(self.device)) 
             p_h_given_v = torch.softmax(activation, dim=1)
             indices = torch.multinomial(p_h_given_v, self.multinomial_sample_size, replacement=True)
             one_hot = torch.zeros(p_h_given_v.size(0), self.multinomial_sample_size, p_h_given_v.size(1), device=self.device).scatter_(2, indices.unsqueeze(-1), 1)
@@ -741,10 +687,9 @@ if __name__ == "__main__":
     dataset = TensorDataset(train_x, train_y)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     
-    dbm = DBM(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 200, savefile="dbm.pth", mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 5, early_stopping_patient = 20, gaussian_top = False, top_sigma = 0.5*torch.ones((1,), dtype=torch.float32), sigma = None, disc_alpha = 0.5)
+    dbm = DBM(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 10, savefile="dbm.pth", mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 5, gaussian_top = False, top_sigma = 0.1*torch.ones((1,), dtype=torch.float32), sigma = None, disc_alpha = 1)
     # dbm.load_model("dbn.pth")
-    # dbm.train(data_loader)
-
+    # dbm.train(data_loader, gibbs_iterations=50, mf_maximum_steps=30, mf_threshold=0.1, convergence_consecutive_hits=3)
     from sklearn.cluster import KMeans
     import matplotlib.pyplot as plt
     from sklearn.decomposition import PCA
@@ -766,18 +711,20 @@ if __name__ == "__main__":
     latent_loader = dbm.encode(data_loader)
     first_layer = dbm.encode(data_loader, depth=1)
     second_layer = dbm.encode(data_loader, depth=2)
-    directory = "../results/plots/DBM/UMAP_new/"
+    directory = "../results/plots/DBM/UMAP_mf/"
     if not os.path.exists(directory):
         os.makedirs(directory)
     first_level, _ = first_layer.dataset.tensors
     second_level, _ = second_layer.dataset.tensors
     final_level, _ = latent_loader.dataset.tensors
     original, labels = data_loader.dataset.tensors
+    first_level, second_layer, final_level = dbm.calc_mf_posteriors(data_loader, gibbs_iterations=50, mf_maximum_steps=30, mf_threshold=0.1, convergence_consecutive_hits=3)
 
     data = final_level
     first_level_data = first_level.cpu().numpy()
     second_level_data = second_level.cpu().numpy()
-    concatenated_data = torch.sum(data, dim = 1).cpu().numpy()
+    # concatenated_data = torch.sum(data, dim = 1).cpu().numpy()
+    concatenated_data = data.cpu().numpy()
     true_label = labels.cpu().numpy().flatten()
     original_data = original.cpu().numpy()
 

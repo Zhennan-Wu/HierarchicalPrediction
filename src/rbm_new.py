@@ -12,18 +12,16 @@ class Binarize(object):
         return (tensor > 0.5).float()
     
 
-class RBM(nn.Module):
-    def __init__(self, visible_dim, hidden_dim):
-        super(RBM, self).__init__()
-        
+class RBM:
+    def __init__(self, visible_dim, hidden_dim, learning_rate, batch_size, n_iter, verbose, random_state):
         # Number of visible and hidden units
         self.visible_dim = visible_dim
         self.hidden_dim = hidden_dim
-        
-        # Initialize weights and biases
-        self.W = nn.Parameter(torch.randn(hidden_dim, visible_dim) * 0.1)  # weights
-        self.v_bias = nn.Parameter(torch.zeros(visible_dim))  # visible layer bias
-        self.h_bias = nn.Parameter(torch.zeros(hidden_dim))   # hidden layer bias
+        self.learning_rate = learning_rate
+        self.batch_size = batch_size
+        self.n_iter = n_iter
+        self.verbose = verbose
+        self.random_state = random_state
 
     def sample_from_prob(self, prob):
         # Sampling binary states from probabilities
@@ -31,45 +29,73 @@ class RBM(nn.Module):
 
     def v_to_h(self, v):
         # Propagate visible layer to hidden layer
-        h_prob = torch.sigmoid(F.linear(v, self.W, self.h_bias))
+        h_prob = torch.sigmoid(torch.matmul(v, self.W.t()) + self.h_bias)
         h_sample = self.sample_from_prob(h_prob)
         return h_prob, h_sample
 
     def h_to_v(self, h):
         # Propagate hidden layer to visible layer
-        v_prob = torch.sigmoid(F.linear(h, self.W.t(), self.v_bias))
+        v_prob = torch.sigmoid(torch.matmul(h, self.W) + self.v_bias)
         v_sample = self.sample_from_prob(v_prob)
         return v_prob, v_sample
-
-    def forward(self, v):
-        # Single step forward pass from visible to hidden and back
-        h_prob, h_sample = self.v_to_h(v)
-        v_prob, v_sample = self.h_to_v(h_sample)
-        return v_prob, v_sample
-
-    def contrastive_divergence(self, v, k=1):
-        # Gibbs Sampling for Contrastive Divergence
-        v_k = v
-        for _ in range(k):
-            h_prob, h_sample = self.v_to_h(v_k)
-            v_prob, v_k = self.h_to_v(h_sample)
+    
+    def persistent_contrastive_divergence(self, v, iter):
+        # Gibbs Sampling for Persistent Contrastive Divergence
+        h_pos, _ = self.v_to_h(v)
+        _, v_neg  = self.h_to_v(self.h_samples_)
+        h_neg, _ = self.v_to_h(v_neg)
         
         # Positive and negative phase
-        h_prob_0, _ = self.v_to_h(v)  # Hidden probabilities from initial visible layer
-        pos_phase = torch.matmul(h_prob_0.t(), v)  # Should match [hidden_dim, visible_dim]
-        neg_phase = torch.matmul(h_prob.t(), v_k)  # Should match [hidden_dim, visible_dim]
+        pos_phase = torch.matmul(h_pos.t(), v)  # Should match [hidden_dim, visible_dim]
+        neg_phase = torch.matmul(h_neg.t(), v_neg)  # Should match [hidden_dim, visible_dim]
 
         # Update weights and biases
-        self.W.grad = -(pos_phase - neg_phase) / v.size(0)
-        self.v_bias.grad = -torch.mean(v - v_k, dim=0)
-        self.h_bias.grad = -torch.mean(h_prob_0 - h_prob, dim=0)
+        lr = self.learning_rate/(self.batch_size)
+        self.W += lr*(pos_phase - neg_phase) / v.size(0)
+        self.v_bias += lr*torch.sum(v - v_neg, dim=0)
+        self.h_bias += lr*torch.sum(h_pos - h_neg, dim=0)
 
+        # Update the persistent chain
+        self.h_samples_ = self.sample_from_prob(h_neg)
 
-    def energy(self, v):
+    def _free_energy(self, v):
         # Energy function of the RBM
-        vbias_term = torch.matmul(v, self.v_bias)
-        hidden_term = torch.sum(torch.log(1 + torch.exp(F.linear(v, self.W, self.h_bias))), dim=1)
+        vbias_term = torch.matmul(v, self.v_bias.reshape(-1, 1))
+        hidden_term = torch.sum(torch.log(1 + torch.exp(torch.matmul(v, self.W.t()) + self.h_bias)), dim=1)
         return -vbias_term - hidden_term
+
+    def score_samples(self, X):
+        """Compute the pseudo-likelihood of X.
+
+        Parameters
+        ----------
+        X : Tensor of shape (n_samples, n_features)
+            Values of the visible layer. Must be all-boolean (not checked).
+
+        Returns
+        -------
+        pseudo_likelihood : Tensor of shape (n_samples,)
+            Value of the pseudo-likelihood (proxy for likelihood).
+        """
+        # Ensure X is a PyTorch tensor
+        X = torch.as_tensor(X).float()
+
+        # Randomly corrupt one feature in each sample in X
+        n_samples, n_features = X.shape
+        ind = (torch.arange(n_samples), torch.randint(0, n_features, (n_samples,)))
+
+        # Create a copy of X and corrupt one feature in each sample
+        X_corrupted = X.clone()
+        X_corrupted[ind] = 1 - X_corrupted[ind]
+
+        # Calculate free energy for the original and corrupted inputs
+        fe = self._free_energy(X)
+        fe_corrupted = self._free_energy(X_corrupted)
+
+        # Compute the pseudo-likelihood using the logistic function of the difference
+        pseudo_likelihood = -n_features * torch.logaddexp(torch.tensor(0.0), -(fe_corrupted - fe))
+
+        return pseudo_likelihood
 
     def encoder(self, dataset: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
         """
@@ -95,29 +121,24 @@ class RBM(nn.Module):
 
         return DataLoader(latent_dataset, batch_size=dataloader.batch_size, shuffle=False)
     
-def train_rbm(rbm, data_loader, epochs=10, batch_size=64, k=1, learning_rate=0.01):
-    optimizer = optim.SGD(rbm.parameters(), lr=learning_rate)
+    def fit(self, data_loader: DataLoader, k=1):
+        """
+        Fit the RBM model
+        """
+        self.W = torch.randn(self.hidden_dim, self.visible_dim, dtype=torch.float32)
+        self.v_bias = torch.zeros(self.visible_dim, dtype=torch.float32)
+        self.h_bias = torch.zeros(self.hidden_dim, dtype=torch.float32)
+        self.h_samples_ = torch.zeros(self.batch_size, self.hidden_dim, dtype=torch.float32)
+        
+        for epoch in range(self.n_iter):
+            epoch_loss = 0
+            for batch in data_loader:
+                v, _ = batch  # Ignore labels
+                v = v.view(-1, self.visible_dim)  # Flatten the input images to [batch_size, visible_dim]
+                # Update parameters
+                self.persistent_contrastive_divergence(v, epoch)
 
-    for epoch in range(epochs):
-        epoch_loss = 0
-        for batch in data_loader:
-            v, _ = batch  # Ignore labels
-            v = v.view(-1, rbm.visible_dim)  # Flatten the input images to [batch_size, visible_dim]
-
-            # Zero gradients
-            optimizer.zero_grad()
-
-            # Contrastive Divergence
-            rbm.contrastive_divergence(v, k=k)
-            
-            # Update parameters
-            optimizer.step()
-
-            # Calculate loss (Free Energy difference)
-            batch_loss = torch.mean(rbm.energy(v))
-            epoch_loss += batch_loss.item()
-
-        print(f"Epoch {epoch+1}/{epochs}, Loss: {epoch_loss/len(data_loader)}")
+            print(f"Epoch {epoch+1}/{self.n_iter} finished")
 
 
 # Example usage
@@ -130,14 +151,19 @@ transform = transforms.Compose([
     Binarize()
 ])
 mnist = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
-data_loader = DataLoader(mnist, batch_size=64, shuffle=True)
+data_loader = DataLoader(mnist, batch_size=64, shuffle=True, drop_last=True)
 
 # Initialize and train the RBM
 visible_dim = 28 * 28  # MNIST images are 28x28
 hidden_dim = 128       # You can adjust this value
+learning_rate = 0.1
+batch_size = 64
+n_iter = 10
+verbose = 1
+random_state = 42
+rbm = RBM(visible_dim, hidden_dim, learning_rate, batch_size, n_iter, verbose, random_state)
 
-rbm = RBM(visible_dim, hidden_dim)
-train_rbm(rbm, data_loader, epochs=10, batch_size=64, k=1, learning_rate=0.01)
+rbm.fit(data_loader)
 
 latent_loader = rbm.encode(data_loader)
 
@@ -172,18 +198,15 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
 sns.set(style='white', context='notebook', rc={'figure.figsize':(14,10)})
-import umap
+from umap import UMAP
 
 
 digits = latent_data
-reducer = umap.UMAP(random_state=42)
-reducer.fit(digits)
+umap = UMAP(n_neighbors=15, min_dist=0.1, n_components=2, random_state=42)
 
-embedding = reducer.transform(digits)
+embedding = umap.fit_transform(digits)
 # Verify that the result of calling transform is
-# idenitical to accessing the embedding_ attribute
-assert(np.all(embedding == reducer.embedding_))
-embedding.shape        
+# idenitical to accessing the embedding_ attribute       
 
 new_dir = directory
 if not os.path.exists(new_dir):
@@ -197,14 +220,9 @@ plt.show()
 plt.close()
 
 digits = original_data
-reducer = umap.UMAP(random_state=42)
-reducer.fit(digits)
-
-embedding = reducer.transform(digits)
+embedding = umap.fit_transform(digits)
 # Verify that the result of calling transform is
 # idenitical to accessing the embedding_ attribute
-assert(np.all(embedding == reducer.embedding_))
-embedding.shape        
 
 plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
 plt.gca().set_aspect('equal', 'datalim')

@@ -9,8 +9,8 @@ from load_dataset import MNIST
 import os
 import time
 from typing import Any, Union, List, Tuple, Dict
-from dbn import DBN
-from rbm import RBM
+from dbn_old import DBN
+from rbm_old import RBM
 import numpy as np
 from tqdm import trange
 from torch.utils.data import DataLoader, TensorDataset
