@@ -227,11 +227,11 @@ class RBM(BernoulliRBM):
             The value of the free energy.
         """
         if (self.add_bias and self.input_dist == 'gaussian'):
-            input_energy = np.sum(((v - self.intercept_visible_))**2 / (self.sigma ** 2), axis=1) - np.logaddexp(0, safe_sparse_dot(v/(self.sigma ** 2), self.components__.T) + self.intercept_hidden_).sum(axis=1)
+            input_energy = np.sum(((v - self.intercept_visible_))**2 / (self.sigma ** 2), axis=1) - np.logaddexp(0, safe_sparse_dot(v/(self.sigma ** 2), self.components_.T) + self.intercept_hidden_).sum(axis=1)
         elif (self.add_bias and self.input_dist == 'bernoulli'):
             input_energy = -safe_sparse_dot(v, self.intercept_visible_) - np.logaddexp(0, safe_sparse_dot(v, self.components_.T) + self.intercept_hidden_).sum(axis=1)
         elif (self.input_dist == 'gaussian'):
-            input_energy = np.sum(v**2 / (self.sigma ** 2), axis=1) - np.logaddexp(0, safe_sparse_dot(v/(self.sigma ** 2), self.components__.T)).sum(axis=1)
+            input_energy = np.sum(v**2 / (self.sigma ** 2), axis=1) - np.logaddexp(0, safe_sparse_dot(v/(self.sigma ** 2), self.components_.T)).sum(axis=1)
         elif (self.input_dist == 'bernoulli'):
             input_energy = - np.logaddexp(0, safe_sparse_dot(v, self.components_.T)).sum(axis=1)
         else:
@@ -239,11 +239,11 @@ class RBM(BernoulliRBM):
         
         if (self.target_in_model):
             if (self.add_bias and self.target_dist == 'gaussian'):
-                target_energy = np.sum((t - self.intercept_target_)**2 / (self.target_sigma ** 2), axis=1) - np.logaddexp(0, safe_sparse_dot(t/(self.target_sigma ** 2), self.target_components__) + self.intercept_hidden_).sum(axis=1)
+                target_energy = np.sum((t - self.intercept_target_)**2 / (self.target_sigma ** 2), axis=1) - np.logaddexp(0, safe_sparse_dot(t/(self.target_sigma ** 2), self.target_components_) + self.intercept_hidden_).sum(axis=1)
             elif (self.add_bias and self.target_dist == 'bernoulli'):
                 target_energy = -safe_sparse_dot(t, self.intercept_target_) - np.logaddexp(0, safe_sparse_dot(t, self.target_components_) + self.intercept_hidden_).sum(axis=1)
             elif (self.target_dist == 'gaussian'):
-                target_energy = np.sum((t**2 / self.target_sigma) ** 2, axis=1) - np.logaddexp(0, safe_sparse_dot(t/(self.target_sigma ** 2), self.target_components__)).sum(axis=1)
+                target_energy = np.sum((t**2 / self.target_sigma) ** 2, axis=1) - np.logaddexp(0, safe_sparse_dot(t/(self.target_sigma ** 2), self.target_components_)).sum(axis=1)
             elif (self.target_dist == 'bernoulli'):
                 target_energy = - np.logaddexp(0, safe_sparse_dot(t, self.target_components_)).sum(axis=1)
             else:

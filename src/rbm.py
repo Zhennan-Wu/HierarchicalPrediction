@@ -19,7 +19,7 @@ from sklearn.utils.extmath import safe_sparse_dot
 from sklearn.utils.validation import check_is_fitted
 
 class RBM(BernoulliRBM):
-    def __init__(self, n_components=2, learning_rate=0.1, batch_size=10, n_iter=10, verbose=0, random_state=None, add_bias=False, target_in_model=False, input_dist='bernoulli', latent_dist='bernoulli',target_dist='gaussian'):
+    def __init__(self, n_components=2, learning_rate=0.1, batch_size=10, n_iter=10, verbose=0, random_state=None, add_bias=False, target_in_model=False, hybrid=False, input_dist='bernoulli', latent_dist='bernoulli',target_dist='gaussian'):
         super().__init__(n_components=n_components, learning_rate=learning_rate,
                          batch_size=batch_size, n_iter=n_iter, verbose=verbose, random_state=random_state)
         self.add_bias = add_bias
@@ -27,6 +27,7 @@ class RBM(BernoulliRBM):
         self.latent_dist = latent_dist # 'bernoulli' or 'multinomial'
         self.target_dist = target_dist # 'bernoulli' or 'gaussian'
         self.target_in_model = target_in_model
+        self.hybrid = hybrid
 
     def transform(self, X, y):
         """Compute the hidden layer activation probabilities, P(h=1|v=X).
@@ -341,19 +342,22 @@ class RBM(BernoulliRBM):
         lr = float(self.learning_rate) / v_pos.shape[0]
         update = safe_sparse_dot(v_pos.T, h_pos, dense_output=True).T
         update -= np.dot(h_neg.T, v_neg)
-        self.components_ += lr * update
-        self.intercept_hidden_ += lr * (h_pos.sum(axis=0) - h_neg.sum(axis=0))
+        self.components_ += lr * update * self.hybrid_alpha
+        self.intercept_hidden_ += lr * (h_pos.sum(axis=0) - h_neg.sum(axis=0)) * self.hybrid_alpha
         self.intercept_visible_ += lr * (
             np.asarray(v_pos.sum(axis=0)).squeeze() - v_neg.sum(axis=0)
-        )
+        ) * self.hybrid_alpha
 
         if (self.target_in_model):
             target_lr = lr/100.
             update_target = safe_sparse_dot(h_pos.T, t_pos/self.target_sigma, dense_output=True).T
             update_target -= np.dot(h_neg.T, t_neg/self.target_sigma).T
-            self.target_components_ += target_lr * update_target
-            self.intercept_target_ += target_lr * (np.sum(t_pos/(self.target_sigma**2), axis=0) - np.sum(t_neg/(self.target_sigma**2), axis=0))
-
+            self.target_components_ += target_lr * update_target * self.hybrid_alpha
+            self.intercept_target_ += target_lr * (np.sum(t_pos/(self.target_sigma**2), axis=0) - np.sum(t_neg/(self.target_sigma**2), axis=0)) * self.hybrid_alpha
+        
+        if (self.hybrid):
+            raise NotImplementedError("Hybrid training not implemented yet")
+        
         if (self.latent_dist == 'multinomial'):
             self.h_samples_ = [rng.multinomial(self.sample_size, pval) for pval in h_neg]
             self.h_samples_ = np.array(self.h_samples_)
@@ -406,7 +410,7 @@ class RBM(BernoulliRBM):
         return -v.shape[1] * np.logaddexp(0, -(fe_ - fe))
 
     @_fit_context(prefer_skip_nested_validation=True)
-    def fit(self, X, y, sample_size=100):
+    def fit(self, X, y, sample_size=100, hybrid_alpha=1.):
         """Fit the model to the data X.
 
         Parameters
@@ -435,6 +439,7 @@ class RBM(BernoulliRBM):
         )
         self.sigma = 0.5
         self.target_sigma = 0.5
+        self.hybrid_alpha = hybrid_alpha
         self.target_components_ = np.asarray(
             rng.normal(0, 0.01, (y.shape[1], self.n_components)),
             order="F",
