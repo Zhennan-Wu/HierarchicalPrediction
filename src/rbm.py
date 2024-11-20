@@ -82,7 +82,7 @@ class RBM(BernoulliRBM):
         if (self.latent_dist == 'bernoulli'):
             p = expit(p, out=p)
         elif (self.latent_dist == 'multinomial'):
-            p = softmax(p)
+            p = softmax(p.astype(np.float64), axis=1)
         else:
             raise ValueError("Invalid latent distribution: {}".format(self.latent_dist))
         return p
@@ -359,7 +359,7 @@ class RBM(BernoulliRBM):
             raise NotImplementedError("Hybrid training not implemented yet")
         
         if (self.latent_dist == 'multinomial'):
-            self.h_samples_ = [rng.multinomial(self.sample_size, pval) for pval in h_neg]
+            self.h_samples_ = [rng.multinomial(self.sample_size, pval/np.sum(pval)) for pval in h_neg]
             self.h_samples_ = np.array(self.h_samples_)
         elif (self.latent_dist == 'bernoulli'):
             h_neg[rng.uniform(size=h_neg.shape) < h_neg] = 1.0  # sample binomial
@@ -445,7 +445,6 @@ class RBM(BernoulliRBM):
             order="F",
             dtype=y.dtype,
         )
-            
         self.intercept_target_ = np.zeros(y.shape[1], dtype=y.dtype)
         self._n_features_out = self.components_.shape[0]
         self.intercept_hidden_ = np.zeros(self.n_components, dtype=X.dtype)
@@ -477,7 +476,7 @@ class RBM(BernoulliRBM):
 
         return self
 
-    def fit_dataloader(self, dataloader, v_dim, t_dim, sample_size=100, hybrid_alpha=1.):
+    def fit_dataloader(self, dataloader, v_dim, t_dim, visible_bias=None, sample_size=100, hybrid_alpha=1.):
         """Fit the model to the data X.
 
         Parameters
@@ -512,7 +511,10 @@ class RBM(BernoulliRBM):
         self.intercept_target_ = np.zeros(t_dim, dtype=np.float32)
         self._n_features_out = self.components_.shape[0]
         self.intercept_hidden_ = np.zeros(self.n_components, dtype=np.float32)
-        self.intercept_visible_ = np.zeros(v_dim, dtype=np.float32)
+        if (visible_bias is not None):
+            self.intercept_visible_ = visible_bias
+        else:
+            self.intercept_visible_ = np.zeros(v_dim, dtype=np.float32)
         self.h_samples_ = np.zeros((dataloader.batch_size, self.n_components), dtype=np.float32)
 
         verbose = self.verbose

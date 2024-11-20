@@ -33,7 +33,7 @@ class HierarchicalDirichletProcess:
         - fixed_layers (dict): the fixed number of categories in each layer
         - global_sample_size (int): the number of samples to draw from the Global Dirichlet Process
         '''
-        ########################################################################################
+        #########################################################################################
         # fixed features
         ########################################################################0################
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

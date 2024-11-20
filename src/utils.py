@@ -1,6 +1,9 @@
 import torch
 import pyro
 import random
+from umap import UMAP
+import matplotlib.pyplot as plt 
+import numpy as np
 
 from pyro.distributions import Categorical
 from typing import Any, Union, List, Tuple, Dict
@@ -129,3 +132,85 @@ def print_tree(d, file:str=None, indent:int =0, opened:bool = False):
             else:
                 # Print the value with additional indentation
                 print('    ' * (indent + 1) + str(value))
+
+
+def visualize_rbm(rbm, hidden_loader, level, savefig):
+    X_train_bin, y_train = hidden_loader.dataset.tensors
+    X_train_bin = X_train_bin.detach().cpu().numpy()
+    y_train = y_train.detach().cpu().numpy()
+    y_train_input = y_train.reshape(X_train_bin.shape[0], -1) / 10.0 
+    X_train_embedded = rbm.transform(X_train_bin, y_train_input)
+    umap = UMAP()
+    # Fit and transform the data
+    X_train_umap = umap.fit_transform(X_train_embedded)
+    
+    # Plot the results
+    plt.figure(figsize=(10, 8))
+    scatter = plt.scatter(X_train_umap[:, 0], X_train_umap[:, 1], c=y_train, cmap="Spectral", s=1, alpha=0.6)
+    plt.colorbar(scatter, label="Digit Label")
+    plt.title("UMAP RBM Embedding of MNIST Training Data of level {}".format(level))
+    plt.xlabel("UMAP Dimension 1")
+    plt.ylabel("UMAP Dimension 2")
+    # plt.show()
+    filename = savefig + "level_" + str(level) + ".png"
+    plt.savefig(filename)
+    plt.close()
+
+
+def visualize_data(hidden_loader, level, savefig, project):
+    X_train_bin, y_train = hidden_loader.dataset.tensors
+    X_train_embedded = X_train_bin.detach().cpu().numpy()
+    y_train = y_train.detach().cpu().numpy()
+    y_train_input = y_train.reshape(X_train_bin.shape[0], -1) / 10.0
+    if project:
+        X_train_embedded = project_points_to_simplex(X_train_embedded)
+    
+    umap = UMAP()
+    # Fit and transform the data
+    X_train_umap = umap.fit_transform(X_train_embedded)
+    
+    # Plot the results
+    plt.figure(figsize=(10, 8))
+    scatter = plt.scatter(X_train_umap[:, 0], X_train_umap[:, 1], c=y_train, cmap="Spectral", s=1, alpha=0.6)
+    plt.colorbar(scatter, label="Digit Label")
+    plt.title("UMAP RBM Encoding of MNIST Training Data of level {}".format(level))
+    plt.xlabel("UMAP Dimension 1")
+    plt.ylabel("UMAP Dimension 2")
+    plt.savefig(savefig)
+    plt.close()
+    # plt.show()    
+
+
+def project_points_to_simplex(points):
+    """
+    Projects each point in a multidimensional cube [0, 1]^n onto the n-dimensional simplex.
+
+    Parameters:
+        points (np.ndarray): A 2D numpy array where each row is a point in the hypercube [0, 1]^n.
+
+    Returns:
+        np.ndarray: A 2D numpy array with each row projected onto the n-dimensional simplex.
+    """
+    # Number of points and dimension
+    num_points, dim = points.shape
+    
+    # Array to store the projected points
+    projected_points = np.zeros_like(points)
+    
+    for i in range(num_points):
+        point = points[i]
+        
+        # Step 1: Sort the point in descending order
+        u = np.sort(point)[::-1]
+        
+        # Step 2: Find the largest k such that the projection condition holds
+        cumulative_sum = np.cumsum(u)
+        rho = np.where(u > (cumulative_sum - 1) / (np.arange(dim) + 1))[0][-1]
+        
+        # Step 3: Compute theta
+        theta = (cumulative_sum[rho] - 1) / (rho + 1)
+        
+        # Step 4: Project point onto the simplex
+        projected_points[i] = np.maximum(point - theta, 0)
+    
+    return projected_points

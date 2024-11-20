@@ -3,12 +3,11 @@ import os
 import time
 from typing import Any, Union, List, Tuple, Dict
 from dbn import DBN
-from rbm_old import RBM
 import numpy as np
 from tqdm import trange
 from torch.utils.data import DataLoader, TensorDataset
 import pyro.distributions as dist
-
+from utils import visualize_rbm, visualize_data, project_points_to_simplex
 # import matplotlib
 # matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
@@ -20,19 +19,19 @@ class DBM(DBN):
     """
     Deep Boltzmann Machine
     """
-    def __init__(self, input_size: int, layers: list, batch_size: int, epochs: int = 100, savefile: str = None, mode: str = "bernoulli", multinomial_top: bool=False, multinomial_sample_size: int = 0, bias: bool = False, k: int = 5, gaussian_top: bool = False, top_sigma: torch.Tensor = None, sigma: torch.Tensor = None, disc_alpha: float = 1.):
+    def __init__(self, input_size: int, layers: list, batch_size: int, epochs: int = 10, savefile: str = None, mode: str = "bernoulli", multinomial_top: bool=False, multinomial_sample_size: int = 0, bias: bool = False, k: int = 5, gaussian_top: bool = False, top_sigma: torch.Tensor = None, sigma: torch.Tensor = None, disc_alpha: float = 1.0):
         super().__init__(input_size, layers, batch_size, epochs, savefile, mode, multinomial_top, multinomial_sample_size, bias, k, gaussian_top, top_sigma, sigma, disc_alpha)
+
         self.layer_mean_field_parameters = [{"mu":None} for _ in range(len(layers))]
         self.regression_progress = []
         self.progress = []
-        self.savefile = savefile
     
-    def sample_h(self, layer_index: int, x_bottom: torch.Tensor, x_top: torch.Tensor = None) -> torch.Tensor:
+    def two_way_sample_h(self, layer_index: int, x_bottom: torch.Tensor, x_top: torch.Tensor = None) -> torch.Tensor:
         """
         Sample hidden units given visible units
         """
         W_bottom = self.layer_parameters[layer_index]["W"]
-        b_bottom = self.layer_parameters[layer_index]["hb"]
+        bias = self.layer_parameters[layer_index]["hb"]
         if (layer_index == len(self.layers)-1):
             W_top = self.top_parameters["W"]
         else:
@@ -43,11 +42,11 @@ class DBM(DBN):
             x_top = torch.zeros((1, W_top.size(0)), device=self.device)
 
         if (layer_index == 0):
-            activation = torch.matmul(x_bottom/self.sigma**2, W_bottom.t()) + b_bottom + torch.matmul(x_top, W_top)
+            activation = torch.matmul(x_bottom/(self.sigma**2), W_bottom.t()) + torch.matmul(x_top, W_top) + bias
         elif (layer_index == len(self.layers)-1):
-            activation = torch.matmul(x_bottom, W_bottom.t()) + torch.matmul(x_top/self.top_sigma**2, W_top) + b_bottom 
+            activation = torch.matmul(x_bottom, W_bottom.t()) + torch.matmul(x_top/(self.top_sigma**2), W_top) + bias
         else:
-            activation = torch.matmul(x_bottom, W_bottom.t()) + torch.matmul(x_top, W_top) + b_bottom 
+            activation = torch.matmul(x_bottom, W_bottom.t()) + torch.matmul(x_top, W_top) + bias
 
         if (layer_index == len(self.layers)-1 and self.multinomial_top):
             p_h_given_v = torch.softmax(activation, dim=1)
@@ -58,8 +57,8 @@ class DBM(DBN):
             p_h_given_v = torch.sigmoid(activation)
             variables = torch.bernoulli(p_h_given_v)
         return p_h_given_v, variables
-        
-    def generate_input_for_layer(self, index: int, dataset: torch.Tensor) -> torch.Tensor:
+
+    def generate_latent_sample_for_layer(self, index: int, dataset: torch.Tensor) -> torch.Tensor:
         """
         Generate input for layer
         """
@@ -70,78 +69,12 @@ class DBM(DBN):
             for _ in range(self.k):
                 x_dash = dataset.to(self.device)
                 for i in range(index):
-                    _, x_dash = self.sample_h(i, x_dash)
+                    _, x_dash = self.two_way_sample_h(i, x_dash)
                 x_gen.append(x_dash)
             x_dash = torch.stack(x_gen)
             x_dash = torch.mean(x_dash, dim=0)
             return x_dash
-        
-    def load_model(self, savefile: str):
-        """
-        Load DBN or DBM model
-        """
-        model = torch.load(savefile, weights_only=False)
-        layer_parameters = []
-        for index in range(len(model["W"])):
-            layer_parameters.append({"W":model["W"][index].to(self.device), "hb":model["hb"][index].to(self.device), "vb":model["vb"][index].to(self.device)})
-        
-        top_parameters = {"W":model["TW"][0].to(self.device), "hb":model["tb"][0].to(self.device), "vb":layer_parameters[-1]["hb"].to(self.device)}
-        self.layer_parameters = layer_parameters
-        self.top_parameters = top_parameters
 
-    def load_nn_model(self, savefile: str):
-        """
-        Load nn model
-        """
-        dbn_model = torch.load(savefile, weights_only=False)
-        for layer_no, layer in enumerate(dbn_model):
-            # if (layer_no//2 == len(self.layer_parameters)-1):
-            #     break
-            if (layer_no%2 == 0):
-                self.layer_parameters[layer_no//2]["W"] = layer.weight.to(self.device)
-                if (self.bias):
-                    self.layer_parameters[layer_no//2]["vb"] = layer.bias.to(self.device)
-                print("Loaded Layer", layer_no//2)
-        for index, layer in enumerate(self.layer_parameters):
-            if (index < len(self.layer_parameters)-1):
-                self.layer_parameters[index]["hb"] = self.layer_parameters[index+1]["vb"]
-
-    def save_model(self, savefile: str = None):
-        """
-        Save model
-        """
-        if (savefile is None):
-            savefile = self.savefile
-        model = {"W": [], "vb": [], "hb": [], "TW": [], "tb": []}
-        for layer in self.layer_parameters:
-            model["W"].append(layer["W"])
-            model["vb"].append(layer["vb"])
-            model["hb"].append(layer["hb"])
-        model["TW"].append(self.top_parameters["W"])
-        model["tb"].append(self.top_parameters["hb"])
-        torch.save(model, savefile)
-
-    def initialize_nn_model(self):
-        """
-        Initialize model
-        """
-        print("The last layer will not be activated. The rest are activated using the Sigmoid function.")
-
-        modules = []
-        for index, layer in enumerate(self.layer_parameters):
-            modules.append(torch.nn.Linear(layer["W"].shape[1], layer["W"].shape[0]))
-            if (index < len(self.layer_parameters)-1):
-                modules.append(torch.nn.Sigmoid())
-        model = torch.nn.Sequential(*modules)
-        model = model.to(self.device)
-
-        for layer_no, layer in enumerate(model):
-            if (layer_no//2 == len(self.layer_parameters)-1):
-                break
-            if (layer_no%2 == 0):
-                model[layer_no].weight = torch.nn.Parameter(self.layer_parameters[layer_no//2]["W"])
-        return model
-    
     def gibbs_update_dataloader(self, dataloader: DataLoader, gibbs_iterations, discriminator: bool = False) -> DataLoader:
         """
         Gibbs update dataloader
@@ -149,26 +82,7 @@ class DBM(DBN):
         # Update samples (subsample a subset of Markov Chains is excluded, it might need be added later for better performance)
         new_mcmc = [[] for _ in range(len(self.layers)+2)]
         if (discriminator):
-            for variables in dataloader:
-                pre_updated_variables = [var.to(self.device) for var in variables]
-                for _ in range(gibbs_iterations):
-                    new_variables = []
-                    for index in range(len(self.layers)+2):
-                        if (index == 0):
-                            var = pre_updated_variables[index]
-                            new_variables.append(var)
-                        elif (index == len(self.layers)+1):
-                            _, var = self.sample_r(pre_updated_variables[index-1])
-                            new_variables.append(var)
-                        else:  
-                            _, var = self.sample_h(index-1, pre_updated_variables[index-1], pre_updated_variables[index+1])
-                            new_variables.append(var)
-                    pre_updated_variables = new_variables
-                for index, var in enumerate(pre_updated_variables):
-                    new_mcmc[index].append(var)
-            new_tensor_variables = []
-            for variable in new_mcmc:
-                new_tensor_variables.append(torch.cat(variable))
+            pass
         else:
             for variables in dataloader:
                 pre_updated_variables = [var.to(self.device) for var in variables]
@@ -182,7 +96,7 @@ class DBM(DBN):
                             _, var = self.sample_r(pre_updated_variables[index-1])
                             new_variables.append(var)
                         else:  
-                            _, var = self.sample_h(index-1, pre_updated_variables[index-1], pre_updated_variables[index+1])
+                            _, var = self.two_way_sample_h(index-1, pre_updated_variables[index-1], pre_updated_variables[index+1])
                             new_variables.append(var)
                     pre_updated_variables = new_variables
                 for index, var in enumerate(pre_updated_variables):
@@ -199,19 +113,19 @@ class DBM(DBN):
         # Update samples (subsample a subset of Markov Chains is excluded, it might need be added later for better performance)
         variables = []
         for index in range(len(self.layers)+1):
-            variables.append(self.generate_input_for_layer(index, data))
+            variables.append(self.generate_latent_sample_for_layer(index, data))
         variables.append(label)
         for _ in range(gibbs_iterations):
             new_variables = []
             for index in range(len(self.layers)+2):
                 if (index == 0):
-                    _, var = self.sample_v(index, variables[index+1])
+                    _, var = self.sample_v(index, variables[index+1], label)
                     new_variables.append(var)
                 elif (index == len(self.layers)+1):
                     _, var = self.sample_r(variables[-1])
                     new_variables.append(var)
                 else:  
-                    _, var = self.sample_h(index-1, variables[index-1], variables[index+1])
+                    _, var = self.two_way_sample_h(index-1, variables[index-1], variables[index+1])
                     new_variables.append(var)
             variables = new_variables
         return variables
@@ -271,7 +185,7 @@ class DBM(DBN):
         plt.savefig(directory + plot_title.replace(" ", "_") + ".png")
         plt.close()
 
-    def calc_mf_posteriors(self, dataloader: DataLoader, gibbs_iterations: int=50, mf_maximum_steps: int=300, mf_threshold: float=0.1, convergence_consecutive_hits: int=3):
+    def train(self, dataloader: DataLoader, gibbs_iterations: int=50, mf_maximum_steps: int=30, mf_threshold: float=0.1, convergence_consecutive_hits: int=3):
         """
         Train DBM
         """
@@ -284,83 +198,7 @@ class DBM(DBN):
                 elif (index == len(self.layers)+1):
                     variables[index].append(label.to(torch.float32).unsqueeze(1))
                 else:
-                    variables[index].append(self.generate_input_for_layer(index, data))
-        
-        tensor_variables = []
-        for variable in variables:
-            tensor_variables.append(torch.cat(variable))
-        mcmc_loader = DataLoader(TensorDataset(*tensor_variables), batch_size=self.batch_size, shuffle=False)
-
-        disc_loader = DataLoader(TensorDataset(*tensor_variables), batch_size=self.batch_size, shuffle=False)
-
-        # Mean field updates
-        mf_posteriors = []
-        for index, _ in enumerate(self.layers):
-            mf_posteriors.append([])
-        with torch.no_grad():
-            mcmc_loader = self.gibbs_update_dataloader(mcmc_loader, gibbs_iterations)
-            disc_loader = self.gibbs_update_dataloader(disc_loader, gibbs_iterations, discriminator=True)
-
-            for dataset, mcmc_samples, disc_samples in zip(dataloader, mcmc_loader, disc_loader):
-                elbos = []
-                label = dataset[1].unsqueeze(1).to(torch.float32).to(self.device)
-                dataset = dataset[0].to(self.device)
-                mcmc_samples = [sample.to(self.device) for sample in mcmc_samples]
-                disc_samples = [sample.to(self.device) for sample in disc_samples]
-                for index, _ in enumerate(self.layers):
-                    unnormalized_mf_param = torch.rand((self.batch_size, self.layers[index]), device = self.device)
-                    self.layer_mean_field_parameters[index]["mu"] = unnormalized_mf_param/torch.sum(unnormalized_mf_param, dim=1).unsqueeze(1)
-                mf_step = 0
-                mf_convergence_count = [0]*len(self.layers)
-                mf_difference = {k: [] for k in range(len(self.layers))}
-                while (mf_step < mf_maximum_steps):
-                    for index, _ in enumerate(self.layers):
-                        old_mu = self.layer_mean_field_parameters[index]["mu"]
-                        if (index == len(self.layers)-1):
-                            activation = torch.matmul(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"].t()) + torch.matmul(label/self.top_sigma, self.top_parameters["W"])
-
-                        elif (index == 0):
-                            activation = torch.matmul(dataset/self.sigma, self.layer_parameters[index]["W"].t())+ torch.matmul(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"])
-
-                        else:
-                            activation = torch.matmul(self.layer_mean_field_parameters[index-1]["mu"], self.layer_parameters[index]["W"].t()) + torch.matmul(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"])
-
-                        self.layer_mean_field_parameters[index]["mu"] = torch.sigmoid(activation)
-                        if ((self.layer_mean_field_parameters[index]["mu"] < 0).any()):
-                            print(activation)
-                            raise ValueError("Negative Mean Field Parameters")
-
-                        new_diff = torch.max(torch.abs(old_mu - self.layer_mean_field_parameters[index]["mu"])).item()
-                        mf_difference[index].append(new_diff)
-                        if (new_diff < mf_threshold):
-                            mf_convergence_count[index] += 1
-                        else:
-                            mf_convergence_count[index] -=1
-                    elbos.append(self.calc_ELBO(dataset))
-                    mf_step += 1
-                    if (all(x > convergence_consecutive_hits for x in mf_convergence_count)):
-                        print("Mean Field Converged with {} iterations".format(mf_step))
-                        break
-                for index in range(len(self.layers)):
-                    mf_posteriors[index].append(self.layer_mean_field_parameters[index]["mu"])
-        for index in range(len(self.layers)):
-            mf_posteriors[index] = torch.cat(mf_posteriors[index])
-        return mf_posteriors
-
-    def train(self, dataloader: DataLoader, gibbs_iterations: int=50, mf_maximum_steps: int=300, mf_threshold: float=0.1, convergence_consecutive_hits: int=3):
-        """
-        Train DBM
-        """
-        # Initialize mean field parameters
-        variables = [[] for _ in range(len(self.layers)+2)]
-        for data, label in dataloader:
-            for index in range(len(self.layers)+2):
-                if (index == 0):
-                    variables[index].append(data)
-                elif (index == len(self.layers)+1):
-                    variables[index].append(label.to(torch.float32).unsqueeze(1))
-                else:
-                    variables[index].append(self.generate_input_for_layer(index, data))
+                    variables[index].append(self.generate_latent_sample_for_layer(index, data))
         
         tensor_variables = []
         for variable in variables:
@@ -378,7 +216,7 @@ class DBM(DBN):
                 regression_loss = torch.tensor([0.], device=self.device)
                 counter = 0
                 mcmc_loader = self.gibbs_update_dataloader(mcmc_loader, gibbs_iterations)
-                disc_loader = self.gibbs_update_dataloader(disc_loader, gibbs_iterations, discriminator=True)
+                disc_loader = self.gibbs_update_dataloader(disc_loader, gibbs_iterations, discriminator=False)
                 alpha =1./(1000 + epoch)
                 dataset_index = 0
                 for dataset, mcmc_samples, disc_samples in zip(dataloader, mcmc_loader, disc_loader):
@@ -425,7 +263,8 @@ class DBM(DBN):
                     dataset_index += 1
                     if (mf_step == mf_maximum_steps):
                         torch.set_printoptions(precision=2)
-                        print("For episode {} dataset {}, Mean Field did not converge with layerwise difference {}".format(epoch, dataset_index, mf_difference))
+                        # print("For episode {} dataset {}, Mean Field did not converge with maximum layerwise difference {}".format(epoch, dataset_index, mf_difference))
+                        print("For episode {} dataset {}, Mean Field did not converge".format(epoch, dataset_index))
                         directory = "../results/plots/DBM/MF_Differences/dataset_{}/".format(dataset_index)
                         if not os.path.exists(directory):
                             os.makedirs(directory)
@@ -475,10 +314,6 @@ class DBM(DBN):
                             self.top_parameters["hb"] = self.top_parameters["hb"] + alpha * (generation_loss + self.disc_alpha * discrimination_loss)
 
                             self.top_parameters["vb"] = self.layer_parameters[-1]["hb"]
-
-                    reconstructed_data, _, reconstrcted_label = self.reconstructor(dataset, label)
-                    train_loss += torch.mean(torch.abs(dataset - reconstructed_data.to(self.device))) + torch.mean(torch.abs(label - reconstrcted_label.to(self.device)))
-                    regression_loss += torch.mean(torch.abs(label - reconstrcted_label.to(self.device)))
                     counter += 1
 
                 self.progress.append(train_loss.item()/counter)
@@ -503,454 +338,55 @@ class DBM(DBN):
             torch.save(model, savefile)     
             self.save_model()   
 
-    def reconstructor(self, x: torch.Tensor, label: torch.Tensor, depth: int = -1) -> torch.Tensor:
-        """
-        Reconstruct input
-        """
-        if (depth == -1):
-            depth = len(self.layers)
-
-        x_gen = []
-        r_gen = []
-        for _ in range(self.k):
-            x_dash = x.clone()
-            for i in range(depth):
-                if (i == len(self.layers)-1):
-                    _, r_dash = self.sample_h(i, x_dash)
-                    _, r_dash = self.sample_r(r_dash)
-                    r_gen.append(r_dash)
-                    _, x_dash = self.sample_h(i, x_dash, label)
-                else:
-                    _, x_dash = self.sample_h(i, x_dash)
-
-            x_gen.append(x_dash)
-        x_dash = torch.stack(x_gen)
-        x_dash = torch.mean(x_dash, dim=0)
-        r_dash = torch.stack(r_gen)
-        r_dash = torch.mean(r_dash, dim=0)
-
-        y = x_dash
-
-        y_gen = []
-        for _ in range(self.k):
-            y_dash = y.clone()
-            for i in range(depth-1, -1, -1):
-                _, y_dash = self.sample_v(i, y_dash)
-            y_gen.append(y_dash)
-        y_dash = torch.stack(y_gen)
-        y_dash = torch.mean(y_dash, dim=0)
-
-        return y_dash, x_dash, r_dash
-
-    def reconstruct(self, dataloader: DataLoader, depth: int = -1) -> DataLoader:
-        """
-        Reconstruct input
-        """
-        visible_data = []
-        latent_vars = []
-        data_labels = []
-        pseudo_labels_list = []
-        for batch, label in dataloader:
-            batch = batch.to(self.device)
-            label = label.unsqueeze(1).to(torch.float32).to(self.device)
-            visible, latent, pseudo_labels = self.reconstructor(batch, label, depth)
-            visible_data.append(visible)
-            latent_vars.append(latent)
-            data_labels.append(label)
-            pseudo_labels_list.append(pseudo_labels)
-        visible_data = torch.cat(visible_data, dim=0)
-        latent_vars = torch.cat(latent_vars, dim=0)
-        data_labels = torch.cat(data_labels, dim=0)
-        pseudo_labels_list = torch.cat(pseudo_labels_list, dim=0)
-        dataset = TensorDataset(visible_data, latent_vars, data_labels, pseudo_labels_list)
-        return DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
-   
-    def encoder(self, dataset: torch.Tensor, label: torch.Tensor, repeat: int, depth: int) -> torch.Tensor:
-        """
-        Generate top level latent variables
-        """
-        dataset = dataset.to(self.device)
-        if (self.multinomial_top and depth == len(self.layers)):
-            x_bottom = self.generate_input_for_layer(depth-1, dataset)
-            W_bottom = self.layer_parameters[-1]["W"].to(self.device)
-            b_bottom = self.layer_parameters[-1]["hb"].to(self.device)
-            activation = torch.matmul(x_bottom, W_bottom.t()) + b_bottom + torch.matmul(label/self.top_sigma**2, self.top_parameters["W"].to(self.device)) 
-            p_h_given_v = torch.softmax(activation, dim=1)
-            indices = torch.multinomial(p_h_given_v, self.multinomial_sample_size, replacement=True)
-            one_hot = torch.zeros(p_h_given_v.size(0), self.multinomial_sample_size, p_h_given_v.size(1), device=self.device).scatter_(2, indices.unsqueeze(-1), 1)
-            return one_hot           
-        else:
-            x_gen = []
-            for _ in range(repeat):
-                x_dash = dataset
-                for i in range(len(self.layers)):
-                    if (i == len(self.layers)-1):
-                        _, x_dash = self.sample_h(i, x_dash, label)
-                    else:
-                        _, x_dash = self.sample_h(i, x_dash)
-                x_gen.append(x_dash)
-            x_dash = torch.stack(x_gen, dim=1)
-            x_dash = torch.mean(x_dash, dim=1)
-            return x_dash
-
-    def decoder(self, top_level_latent_variables_distributions: torch.Tensor, repeat: int):
-        """
-        Reconstruct observation
-        """
-        if (self.multinomial_top):
-            x = dist.Bernoulli(probs=top_level_latent_variables_distributions).sample((self.multinomial_sample_size,))
-            y_dash = torch.sum(x, dim=1)
-
-            _, r_dash = self.sample_r(y_dash)
-
-            y_gen = []
-            for _ in range(self.k):
-                for i in range(len(self.layers)-1, -1, -1):
-                    _, y_dash = self.sample_v(y_dash, self.layer_parameters[i]["W"])
-                y_gen.append(y_dash)
-            y_dash = torch.stack(y_gen)
-            y_dash = torch.mean(y_dash, dim=0)
-        else:
-            top_level_latent_variables_distributions = top_level_latent_variables_distributions.to(self.device)
-            y_gen = []
-            for _ in range(repeat):
-                y_gen.append(torch.bernoulli(top_level_latent_variables_distributions))
-            y_dash = torch.sum(torch.stack(y_gen, dim=1), dim=1)
-
-            _, r_dash = self.sample_r(y_dash)
-
-            y_gen = []
-            for _ in range(self.k):
-                for i in range(len(self.layers)-1, -1, -1):
-                    _, y_dash = self.sample_v(y_dash, self.layer_parameters[i]["W"])
-                y_gen.append(y_dash)
-            y_dash = torch.stack(y_gen)
-            y_dash = torch.mean(y_dash, dim=0)
-
-        return y_dash, r_dash
-    
-    def encode(self, dataloader: DataLoader, depth: int = -1, repeat: int = 10) -> DataLoader:
-        """
-        Encode data
-        """
-        if (depth == -1):
-            depth = len(self.layers)
-        latent_vars = []
-        labels = []
-        for data, label in dataloader:
-            data = data.to(self.device)
-            label = label.unsqueeze(1).to(torch.float32).to(self.device)
-            latent_vars.append(self.encoder(data, label, repeat, depth))
-            labels.append(label)
-        latent_vars = torch.cat(latent_vars, dim=0)
-        labels = torch.cat(labels, dim=0)
-        latent_dataset = TensorDataset(latent_vars, labels)
-
-        return DataLoader(latent_dataset, batch_size=self.batch_size, shuffle=False)
-    
-    def decode(self, dataloader: DataLoader, repeat: int = 10) -> DataLoader:
-        """
-        Decode data
-        """
-        visible_data = []
-        pseudo_labels = []
-        labels = []
-        for data, label in dataloader:
-            pseudo_data, pseudo_label = self.decoder(data, repeat)
-            visible_data.append(pseudo_data)
-            pseudo_labels.append(pseudo_label)
-            labels.append(label)
-        visible_data = torch.cat(visible_data, dim=0)
-        pseudo_labels = torch.cat(pseudo_labels, dim=0)
-        labels = torch.cat(labels, dim=0)
-        if (self.gaussian_top):
-            visible_dataset = TensorDataset(visible_data, pseudo_labels, labels)
-        else:
-            visible_dataset = TensorDataset(visible_data, labels)
-
-        return DataLoader(visible_dataset, batch_size=self.batch_size, shuffle=False)
-    
 
 if __name__ == "__main__":
     mnist = MNIST()
     train_x, train_y, test_x, test_y = mnist.load_dataset()
     print('MAE for all 0 selection:', torch.mean(train_x))
-
     batch_size = 1000	
     datasize = train_x.shape[0]
     data_dimension = train_x.shape[1]
+    
     print("The whole dataset has {} data. The dimension of each data is {}. Batch size is {}.".format(datasize, data_dimension, batch_size))
 
-    # train_x = train_x[:batch_size*3]
-    # train_y = train_y[:batch_size*3]    
-
+    # train_x = train_x[:3*batch_size]
+    # train_y = train_y[:3*batch_size]
+    
     dataset = TensorDataset(train_x, train_y)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-    
-    dbm = DBM(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 10, savefile="dbm.pth", mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 5, gaussian_top = False, top_sigma = 0.1*torch.ones((1,), dtype=torch.float32), sigma = None, disc_alpha = 1)
-    # dbm.load_model("dbn.pth")
-    # dbm.train(data_loader, gibbs_iterations=50, mf_maximum_steps=30, mf_threshold=0.1, convergence_consecutive_hits=3)
-    from sklearn.cluster import KMeans
-    import matplotlib.pyplot as plt
-    from sklearn.decomposition import PCA
-    # model test
-    dbm.load_model("dbm.pth")
-    image_index = 0
-    # reconstructed_loader = dbm.reconstruct(data_loader)
-    # directory = "../results/plots/DBM/Reconstructed/"
-    # if not os.path.exists(directory):
-    #     os.makedirs(directory)
-    # for data, latent, true_label, pseudo_label in reconstructed_loader:
-    #     for image, value in zip(data, true_label):
-    #         plt.imshow(image.cpu().numpy().reshape(28, 28), cmap='gray')
-    #         new_directory = directory+"true_label_{}/".format(value.item())
-    #         if not os.path.exists(new_directory):
-    #             os.makedirs(new_directory)
-    #         plt.savefig(new_directory + "true_label_{}.png".format(image_index))
-    #         image_index += 1
-    latent_loader = dbm.encode(data_loader)
-    first_layer = dbm.encode(data_loader, depth=1)
-    second_layer = dbm.encode(data_loader, depth=2)
-    directory = "../results/plots/DBM/UMAP_mf/"
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-    first_level, _ = first_layer.dataset.tensors
-    second_level, _ = second_layer.dataset.tensors
-    final_level, _ = latent_loader.dataset.tensors
-    original, labels = data_loader.dataset.tensors
-    first_level, second_layer, final_level = dbm.calc_mf_posteriors(data_loader, gibbs_iterations=50, mf_maximum_steps=30, mf_threshold=0.1, convergence_consecutive_hits=3)
+    # for project_status in [True, False]:
+    for project_status in [True]:
+        # for experiment in ["multinomial_label", "bernoulli_label", "multinomial", "bernoulli"]:
+        for experiment in ["bernoulli"]:
+            directory = "../results/plots/DBM/"
+            experi_type = experiment
+            if (project_status == True):
+                directory = directory + "UMAP_proj_" + experi_type + "/"
+                # if (experiment == "multinomial" or experiment == "multinomial_label"):
+                #     continue
+            else:
+                directory = directory + "UMAP_" + experi_type + "/"
+            dbn_name = "dbn_" + experi_type + ".pth"
+            filename = "dbm_" + experi_type + ".pth"
+            if not os.path.exists(directory):
+                os.makedirs(directory)
 
-    data = final_level
-    first_level_data = first_level.cpu().numpy()
-    second_level_data = second_level.cpu().numpy()
-    # concatenated_data = torch.sum(data, dim = 1).cpu().numpy()
-    concatenated_data = data.cpu().numpy()
-    true_label = labels.cpu().numpy().flatten()
-    original_data = original.cpu().numpy()
+            if (experiment == "bernoulli"):
+                dbm = DBM(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 10, savefile=filename, mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = False, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
+            elif (experiment == "bernoulli_label"):
+                dbm = DBM(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 10, savefile=filename, mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = True, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
+            elif (experiment == "multinomial"):
+                dbm = DBM(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 10, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = False, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
+            elif (experiment == "multinomial_label"):
+                dbm = DBM(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 10, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = True, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
+            else:
+                raise ValueError("Invalid Experiment Type")
+            # dbm.load_model(dbn_name)
+            # dbm.train(data_loader)
 
-    import numpy as np
-    from sklearn.datasets import load_digits
-    from sklearn.model_selection import train_test_split
-    from sklearn.preprocessing import StandardScaler
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    import pandas as pd
-    sns.set(style='white', context='notebook', rc={'figure.figsize':(14,10)})
-    import umap
+            dbm.load_model(filename)
 
-
-    digits = concatenated_data
-    reducer = umap.UMAP(random_state=42)
-    reducer.fit(digits)
-
-    embedding = reducer.transform(digits)
-    # Verify that the result of calling transform is
-    # idenitical to accessing the embedding_ attribute
-    assert(np.all(embedding == reducer.embedding_))
-    embedding.shape        
-
-    new_dir = directory
-    if not os.path.exists(new_dir):
-        os.makedirs(new_dir)
-    plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
-    plt.gca().set_aspect('equal', 'datalim')
-    plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
-    plt.title('UMAP projection of the Digits dataset with final latent embedding Ground Truth', fontsize=24)
-    plt.savefig(new_dir+"final_latent_embedding.png")
-    plt.close()
-
-    digits = second_level_data
-    reducer = umap.UMAP(random_state=42)
-    reducer.fit(digits)
-
-    embedding = reducer.transform(digits)
-    # Verify that the result of calling transform is
-    # idenitical to accessing the embedding_ attribute
-    assert(np.all(embedding == reducer.embedding_))
-    embedding.shape        
-
-    plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
-    plt.gca().set_aspect('equal', 'datalim')
-    plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
-    plt.title('UMAP projection of the Digits dataset with second layer latent embedding Ground Truth', fontsize=24)
-    plt.savefig(new_dir+"second_latent_embedding.png")
-    plt.close()
-
-    digits = first_level_data
-    reducer = umap.UMAP(random_state=42)
-    reducer.fit(digits)
-
-    embedding = reducer.transform(digits)
-    # Verify that the result of calling transform is
-    # idenitical to accessing the embedding_ attribute
-    assert(np.all(embedding == reducer.embedding_))
-    embedding.shape        
-
-    plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
-    plt.gca().set_aspect('equal', 'datalim')
-    plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
-    plt.title('UMAP projection of the Digits dataset with first layer latent embedding Ground Truth', fontsize=24)
-    plt.savefig(new_dir+"first_latent_embedding.png")
-    plt.close()
-
-    digits = original_data
-    reducer = umap.UMAP(random_state=42)
-    reducer.fit(digits)
-
-    embedding = reducer.transform(digits)
-    # Verify that the result of calling transform is
-    # idenitical to accessing the embedding_ attribute
-    assert(np.all(embedding == reducer.embedding_))
-    embedding.shape        
-
-    plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
-    plt.gca().set_aspect('equal', 'datalim')
-    plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
-    plt.title('UMAP projection of the Digits dataset with original data Ground Truth', fontsize=24)
-    plt.savefig(new_dir+"original_data.png")
-    plt.close()
-
-
-    # for first_level, second_level, final_level, original in zip(first_layer, second_layer, latent_loader, data_loader):
-    #     # Initialize KMeans and fit to the data
-    #     data = final_level[0]
-    #     first_level_data = first_level[0].cpu().numpy()
-    #     second_level_data = second_level[0].cpu().numpy()
-    #     concatenated_data = torch.sum(data, dim = 1).cpu().numpy()
-    #     true_label = final_level[1].cpu().numpy().flatten()
-    #     original_data = original[0].cpu().numpy()
-    #     # print("first level data shape: ", first_level_data.shape)  
-    #     # print("second level data shape: ", second_level_data.shape)
-    #     # print("concatenated data shape: ", concatenated_data.shape)
-    #     # kmeans = KMeans(n_clusters=10)
-    #     # kmeans.fit(concatenated_data)
-
-    #     # # Get the cluster centers and labels
-    #     # centers = kmeans.cluster_centers_
-    #     # labels = kmeans.labels_
-
-    #     # unique_values, indices, counts = np.unique(true_label, return_index=True, return_counts=True)
-    #     # for i in unique_values:
-    #     #     print("For number {}".format(i))
-    #     #     # print("Predicted labels")
-    #     #     predicted_labels = labels[np.where(true_label == i)]
-    #     #     pred_values, pred_indices, pred_counts = np.unique(predicted_labels, return_index=True, return_counts=True)
-    #     #     # print(labels[np.where(true_label == i)])
-    #     #     print("Predicted category: {}, Predict counts: {}".format(pred_values, pred_counts))
-
-    #     # directory = "../results/plots/DBM/Clusters/"
-    #     # if not os.path.exists(directory):
-    #     #     os.makedirs(directory)
-    #     # for im, tl in zip(concatenated_data, true_label):
-    #     #     print("True label: ", tl)
-    #     #     plt.imshow(im.reshape(10, 10), cmap='gray')
-    #     #     new_directory = directory+"true_label_{}/".format(tl)
-    #     #     if not os.path.exists(new_directory):
-    #     #         os.makedirs(new_directory)
-    #     #     # plt.savefig(new_directory + "{}.png".format(image_index))
-    #     #      # image_index += 1
-    #     #     plt.show()
-           
-
-    #     # Assuming X is your 100-dimensional data and y_kmeans are the cluster labels
-    #     # Reduce to 2D with PCA
-    #     # pca = PCA(n_components=2)
-    #     # X_pca = pca.fit_transform(concatenated_data)
-
-    #     # # Plot the 2D projection with cluster labels
-    #     # plt.scatter(X_pca[:, 0], X_pca[:, 1], c=labels, cmap='viridis', s=50)
-    #     # plt.title('KMeans Clustering with PCA (2D projection)')
-    #     # plt.xlabel('PCA Component 1')
-    #     # plt.ylabel('PCA Component 2')
-    #     # plt.show()
-
-    #     # plt.scatter(X_pca[:, 0], X_pca[:, 1], c=true_label, cmap='viridis', s=50)
-    #     # plt.title('Ground truth with PCA (2D projection)')
-    #     # plt.xlabel('PCA Component 1')
-    #     # plt.ylabel('PCA Component 2')
-    #     # plt.show()    
-    #     # plt.close()    
-
-
-    #     import numpy as np
-    #     from sklearn.datasets import load_digits
-    #     from sklearn.model_selection import train_test_split
-    #     from sklearn.preprocessing import StandardScaler
-    #     import matplotlib.pyplot as plt
-    #     import seaborn as sns
-    #     import pandas as pd
-    #     sns.set(style='white', context='notebook', rc={'figure.figsize':(14,10)})
-    #     import umap
-
-
-    #     digits = concatenated_data
-    #     reducer = umap.UMAP(random_state=42)
-    #     reducer.fit(digits)
-
-    #     embedding = reducer.transform(digits)
-    #     # Verify that the result of calling transform is
-    #     # idenitical to accessing the embedding_ attribute
-    #     assert(np.all(embedding == reducer.embedding_))
-    #     embedding.shape        
-
-    #     new_dir = directory+"image_{}/".format(image_index)
-    #     if not os.path.exists(new_dir):
-    #         os.makedirs(new_dir)
-    #     plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
-    #     plt.gca().set_aspect('equal', 'datalim')
-    #     plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
-    #     plt.title('UMAP projection of the Digits dataset with final latent embedding Ground Truth', fontsize=24)
-    #     plt.savefig(new_dir+"final_latent_embedding.png")
-    #     plt.close()
-
-    #     digits = second_level_data
-    #     reducer = umap.UMAP(random_state=42)
-    #     reducer.fit(digits)
-
-    #     embedding = reducer.transform(digits)
-    #     # Verify that the result of calling transform is
-    #     # idenitical to accessing the embedding_ attribute
-    #     assert(np.all(embedding == reducer.embedding_))
-    #     embedding.shape        
-
-    #     plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
-    #     plt.gca().set_aspect('equal', 'datalim')
-    #     plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
-    #     plt.title('UMAP projection of the Digits dataset with second layer latent embedding Ground Truth', fontsize=24)
-    #     plt.savefig(new_dir+"second_latent_embedding.png")
-    #     plt.close()
-
-    #     digits = first_level_data
-    #     reducer = umap.UMAP(random_state=42)
-    #     reducer.fit(digits)
-
-    #     embedding = reducer.transform(digits)
-    #     # Verify that the result of calling transform is
-    #     # idenitical to accessing the embedding_ attribute
-    #     assert(np.all(embedding == reducer.embedding_))
-    #     embedding.shape        
-
-    #     plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
-    #     plt.gca().set_aspect('equal', 'datalim')
-    #     plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
-    #     plt.title('UMAP projection of the Digits dataset with first layer latent embedding Ground Truth', fontsize=24)
-    #     plt.savefig(new_dir+"first_latent_embedding.png")
-    #     plt.close()
-
-    #     digits = original_data
-    #     reducer = umap.UMAP(random_state=42)
-    #     reducer.fit(digits)
-
-    #     embedding = reducer.transform(digits)
-    #     # Verify that the result of calling transform is
-    #     # idenitical to accessing the embedding_ attribute
-    #     assert(np.all(embedding == reducer.embedding_))
-    #     embedding.shape        
-
-    #     plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
-    #     plt.gca().set_aspect('equal', 'datalim')
-    #     plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
-    #     plt.title('UMAP projection of the Digits dataset with original data Ground Truth', fontsize=24)
-    #     plt.savefig(new_dir+"original_data.png")
-    #     plt.close()
-    #     image_index += 1
+            latent_loader = dbm.encode(data_loader)
+            new_dir = directory + "final_latent_embedding.png"
+            visualize_data(latent_loader, 3, new_dir, project_status)
+            print("Finished {} Experiment".format(experiment))
