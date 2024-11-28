@@ -2,7 +2,7 @@ import numpy as np
 import time
 from numbers import Integral, Real
 import scipy.sparse as sp
-from scipy.special import expit, softmax  # logistic function
+from scipy.special import expit, softmax 
 import torch
 from torch.utils.data import DataLoader
 
@@ -17,6 +17,7 @@ from sklearn.utils import check_random_state, gen_even_slices
 from sklearn.utils._param_validation import Interval
 from sklearn.utils.extmath import safe_sparse_dot
 from sklearn.utils.validation import check_is_fitted
+
 
 class RBM(BernoulliRBM):
     def __init__(self, n_components=2, learning_rate=0.1, batch_size=10, n_iter=10, verbose=0, random_state=None, add_bias=False, target_in_model=False, hybrid=False, input_dist='bernoulli', latent_dist='bernoulli',target_dist='gaussian'):
@@ -43,9 +44,6 @@ class RBM(BernoulliRBM):
             Latent representations of the data.
         """
         check_is_fitted(self)
-        # X = self._validate_data(
-        #     X, accept_sparse="csr", reset=False, dtype=(np.float64, np.float32)
-        # )
         return self._mean_hiddens(X, y)
 
     def _mean_hiddens(self, v, t):
@@ -82,7 +80,7 @@ class RBM(BernoulliRBM):
         if (self.latent_dist == 'bernoulli'):
             p = expit(p, out=p)
         elif (self.latent_dist == 'multinomial'):
-            p = softmax(p.astype(np.float64), axis=1)
+            p = softmax(p, axis=1)
         else:
             raise ValueError("Invalid latent distribution: {}".format(self.latent_dist))
         return p
@@ -107,6 +105,8 @@ class RBM(BernoulliRBM):
         if (self.latent_dist == 'bernoulli'):
             samples = rng.uniform(size=p.shape) < p
         elif (self.latent_dist == 'multinomial'):
+            # Verify that rows are normalized
+            assert np.allclose(p.sum(axis=1), 1), "Rows of p must be normalized, instead get {}".format(p.sum(axis=1))
             samples = [rng.multinomial(self.sample_size, pval) for pval in p]
             samples = np.array(samples)
         else:
@@ -183,10 +183,6 @@ class RBM(BernoulliRBM):
             p *= self.target_sigma
             if (self.add_bias):
                 p += self.intercept_target_
-        elif (self.target_dist == 'bernoulli'):
-            if (self.add_bias):
-                p += self.intercept_target_
-            p = expit(p, out=p)
         else:
             raise ValueError("Invalid target distribution: {}".format(self.target_dist))
         return p
@@ -208,9 +204,7 @@ class RBM(BernoulliRBM):
             Values of the target layer.
         """
         p = self._mean_targets(h)
-        if (self.target_dist == 'bernoulli'):
-            samples = rng.uniform(size=p.shape) < p
-        elif (self.target_dist == 'gaussian'):
+        if (self.target_dist == 'gaussian'):
             samples = rng.normal(p, self.target_sigma, size=p.shape)
         else:
             raise ValueError("Invalid target distribution: {}".format(self.target_dist))
@@ -230,11 +224,11 @@ class RBM(BernoulliRBM):
             The value of the free energy.
         """
         if (self.add_bias and self.input_dist == 'gaussian'):
-            input_energy = np.sum(((v - self.intercept_visible_) / self.sigma) ** 2, axis=1) - np.logaddexp(0, safe_sparse_dot(v/(self.sigma ** 2), self.components__.T) + self.intercept_hidden_).sum(axis=1)
+            input_energy = np.sum(((v - self.intercept_visible_) / self.sigma) ** 2, axis=1)/2 - np.logaddexp(0, safe_sparse_dot(v/self.sigma, self.components_.T) + self.intercept_hidden_).sum(axis=1)
         elif (self.add_bias and self.input_dist == 'bernoulli'):
             input_energy = -safe_sparse_dot(v, self.intercept_visible_) - np.logaddexp(0, safe_sparse_dot(v, self.components_.T) + self.intercept_hidden_).sum(axis=1)
         elif (self.input_dist == 'gaussian'):
-            input_energy = np.sum((v / self.sigma) ** 2, axis=1) - np.logaddexp(0, safe_sparse_dot(v/(self.sigma ** 2), self.components__.T)).sum(axis=1)
+            input_energy = np.sum((v / self.sigma) ** 2, axis=1)/2 - np.logaddexp(0, safe_sparse_dot(v/self.sigma, self.components_.T)).sum(axis=1)
         elif (self.input_dist == 'bernoulli'):
             input_energy = - np.logaddexp(0, safe_sparse_dot(v, self.components_.T)).sum(axis=1)
         else:
@@ -242,13 +236,9 @@ class RBM(BernoulliRBM):
         
         if (self.target_in_model):
             if (self.add_bias and self.target_dist == 'gaussian'):
-                target_energy = np.sum(((t - self.intercept_target_) / self.target_sigma) ** 2, axis=1) - np.logaddexp(0, safe_sparse_dot(t/(self.target_sigma ** 2), self.target_components__) + self.intercept_hidden_).sum(axis=1)
-            elif (self.add_bias and self.target_dist == 'bernoulli'):
-                target_energy = -safe_sparse_dot(t, self.intercept_target_) - np.logaddexp(0, safe_sparse_dot(t, self.target_components_) + self.intercept_hidden_).sum(axis=1)
+                target_energy = np.sum(((t - self.intercept_target_) / self.target_sigma) ** 2, axis=1)/2 - np.logaddexp(0, safe_sparse_dot(t/self.target_sigma, self.target_components_) + self.intercept_hidden_).sum(axis=1)
             elif (self.target_dist == 'gaussian'):
-                target_energy = np.sum((t / self.target_sigma) ** 2, axis=1) - np.logaddexp(0, safe_sparse_dot(t/(self.target_sigma ** 2), self.target_components__)).sum(axis=1)
-            elif (self.target_dist == 'bernoulli'):
-                target_energy = - np.logaddexp(0, safe_sparse_dot(t, self.target_components_)).sum(axis=1)
+                target_energy = np.sum((t / self.target_sigma) ** 2, axis=1)/2 - np.logaddexp(0, safe_sparse_dot(t/self.target_sigma, self.target_components_)).sum(axis=1)
             else:
                 raise ValueError("Invalid target distribution: {}".format(self.target_dist))
         else:
@@ -359,7 +349,8 @@ class RBM(BernoulliRBM):
             raise NotImplementedError("Hybrid training not implemented yet")
         
         if (self.latent_dist == 'multinomial'):
-            self.h_samples_ = [rng.multinomial(self.sample_size, pval/np.sum(pval)) for pval in h_neg]
+            assert np.allclose(h_neg.sum(axis=1), 1), "Rows of p must be normalized, instead get {}".format(h_neg.sum(axis=1))
+            self.h_samples_ = [rng.multinomial(self.sample_size, pval) for pval in h_neg]
             self.h_samples_ = np.array(self.h_samples_)
         elif (self.latent_dist == 'bernoulli'):
             h_neg[rng.uniform(size=h_neg.shape) < h_neg] = 1.0  # sample binomial
@@ -539,16 +530,3 @@ class RBM(BernoulliRBM):
                 begin = end
 
         return self
-    
-    def _more_tags(self):
-        return {
-            "_xfail_checks": {
-                "check_methods_subset_invariance": (
-                    "fails for the decision_function method"
-                ),
-                "check_methods_sample_order_invariance": (
-                    "fails for the score_samples method"
-                ),
-            },
-            "preserves_dtype": [np.float64, np.float32],
-        }
