@@ -388,152 +388,41 @@ if __name__ == "__main__":
     train_x, train_y, test_x, test_y = mnist.load_dataset()
     print('MAE for all 0 selection:', torch.mean(train_x))
     batch_size = 1000	
+    epochs = 5
     datasize = train_x.shape[0]
     data_dimension = train_x.shape[1]
     
     print("The whole dataset has {} data. The dimension of each data is {}. Batch size is {}.".format(datasize, data_dimension, batch_size))
-
-    # train_x = train_x[:3*batch_size]
-    # train_y = train_y[:3*batch_size]
     
     dataset = TensorDataset(train_x, train_y)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-    # for project_status in [True, False]:
-    for project_status in [True]:
-        for experiment in ["multinomial_label", "bernoulli_label", "multinomial", "bernoulli"]:
-            directory = "../results/plots/DBN/"
-            experi_type = experiment
-            if (project_status == True):
-                directory = directory + "UMAP_proj_" + experi_type + "/"
-                # if (experiment == "multinomial" or experiment == "multinomial_label"):
-                #     continue
-            else:
-                directory = directory + "UMAP_" + experi_type + "/"
-            filename = "dbn_" + experi_type + ".pth"
-            if not os.path.exists(directory):
-                os.makedirs(directory)
 
-            if (experiment == "bernoulli"):
-                dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 10, savefile=filename, mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = False, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
-            elif (experiment == "bernoulli_label"):
-                dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 10, savefile=filename, mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = True, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
-            elif (experiment == "multinomial"):
-                dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 10, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = False, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
-            elif (experiment == "multinomial_label"):
-                dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 10, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = True, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
-            else:
-                raise ValueError("Invalid Experiment Type")
-            # dbn.train(data_loader, directory)
+    for experiment in ["multinomial_label", "bernoulli_label", "multinomial", "bernoulli"]:
+        directory = "../results/plots/DBN/"
+        experi_type = experiment
+        directory = directory + "UMAP_" + experi_type + "/"
+        filename = "dbn_" + experi_type + ".pth"
+        if not os.path.exists(directory):
+            os.makedirs(directory)
 
-            dbn.load_model(filename)
-            from sklearn.cluster import KMeans
-            import matplotlib.pyplot as plt
-            from sklearn.decomposition import PCA
+        if (experiment == "bernoulli"):
+            dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = False, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
+        elif (experiment == "bernoulli_label"):
+            dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = True, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
+        elif (experiment == "multinomial"):
+            dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = False, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
+        elif (experiment == "multinomial_label"):
+            dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = True, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
+        else:
+            raise ValueError("Invalid Experiment Type")
+        dbn.train(data_loader, directory)
 
-            latent_loader = dbn.encode(data_loader)
-            new_dir = directory + "final_latent_embedding.png"
-            visualize_data(latent_loader, 3, new_dir, project_status)
-            print("Finished {} Experiment".format(experiment))
-            # first_layer = dbn.encode(data_loader, depth=1)
-            # second_layer = dbn.encode(data_loader, depth=2)
+        from sklearn.cluster import KMeans
+        import matplotlib.pyplot as plt
+        from sklearn.decomposition import PCA
 
+        latent_loader = dbn.encode(data_loader)
+        new_dir = directory + "final_latent_embedding.png"
+        visualize_data(latent_loader, 3, new_dir)
+        print("Finished {} Experiment".format(experiment))
 
-            # first_level, first_labels = first_layer.dataset.tensors
-            # second_level, second_labels = second_layer.dataset.tensors
-            # final_level, fi= latent_loader.dataset.tensors
-            # original, labels = data_loader.dataset.tensors
-            # if (experiment == "multinomial" or experiment == "multinomial_label"):
-            #     data = final_level.cpu().numpy()
-            # elif (experiment == "bernoulli" or experiment == "bernoulli_label"):
-            #     if (project_status == True):
-            #         data = project_points_to_simplex(final_level.cpu().numpy())
-            #     else:
-            #         data = final_level.cpu().numpy()
-            # else:
-            #     raise ValueError("Invalid Experiment Type")
-            # first_level_data = first_level.cpu().numpy()
-            # second_level_data = second_level.cpu().numpy()
-            # true_label = labels.cpu().numpy().flatten()
-            # original_data = original.cpu().numpy()
-
-            # import numpy as np
-            # from sklearn.datasets import load_digits
-            # from sklearn.model_selection import train_test_split
-            # from sklearn.preprocessing import StandardScaler
-            # import matplotlib.pyplot as plt
-            # import seaborn as sns
-            # import pandas as pd
-            # sns.set(style='white', context='notebook', rc={'figure.figsize':(14,10)})
-            # import umap
-
-
-            # digits = data
-            # reducer = umap.UMAP()
-            # reducer.fit(digits)
-
-            # embedding = reducer.transform(digits)
-            # # Verify that the result of calling transform is
-            # # idenitical to accessing the embedding_ attribute
-            # assert(np.all(embedding == reducer.embedding_))
-            # embedding.shape        
-
-            # new_dir = directory
-            # if not os.path.exists(new_dir):
-            #     os.makedirs(new_dir)
-            # plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
-            # plt.gca().set_aspect('equal', 'datalim')
-            # plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
-            # plt.title('UMAP projection of the Digits dataset with final latent embedding Ground Truth', fontsize=24)
-            # plt.savefig(new_dir+"final_latent_embedding.png")
-            # plt.close()
-
-            # digits = second_level_data
-            # reducer = umap.UMAP()
-            # reducer.fit(digits)
-
-            # embedding = reducer.transform(digits)
-            # # Verify that the result of calling transform is
-            # # idenitical to accessing the embedding_ attribute
-            # assert(np.all(embedding == reducer.embedding_))
-            # embedding.shape        
-
-            # plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
-            # plt.gca().set_aspect('equal', 'datalim')
-            # plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
-            # plt.title('UMAP projection of the Digits dataset with second layer latent embedding Ground Truth', fontsize=24)
-            # plt.savefig(new_dir+"second_latent_embedding.png")
-            # plt.close()
-
-            # digits = first_level_data
-            # reducer = umap.UMAP()
-            # reducer.fit(digits)
-
-            # embedding = reducer.transform(digits)
-            # # Verify that the result of calling transform is
-            # # idenitical to accessing the embedding_ attribute
-            # assert(np.all(embedding == reducer.embedding_))
-            # embedding.shape        
-
-            # plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
-            # plt.gca().set_aspect('equal', 'datalim')
-            # plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
-            # plt.title('UMAP projection of the Digits dataset with first layer latent embedding Ground Truth', fontsize=24)
-            # plt.savefig(new_dir+"first_latent_embedding.png")
-            # plt.close()
-
-            # digits = original_data
-            # reducer = umap.UMAP()
-            # reducer.fit(digits)
-
-            # embedding = reducer.transform(digits)
-            # # Verify that the result of calling transform is
-            # # idenitical to accessing the embedding_ attribute
-            # assert(np.all(embedding == reducer.embedding_))
-            # embedding.shape        
-
-            # plt.scatter(embedding[:, 0], embedding[:, 1], c=true_label, cmap='Spectral', s=5)
-            # plt.gca().set_aspect('equal', 'datalim')
-            # plt.colorbar(boundaries=np.arange(11)-0.5).set_ticks(np.arange(10))
-            # plt.title('UMAP projection of the Digits dataset with original data Ground Truth', fontsize=24)
-            # plt.savefig(new_dir+"original_data.png")
-            # plt.close()

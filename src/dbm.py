@@ -344,49 +344,37 @@ if __name__ == "__main__":
     train_x, train_y, test_x, test_y = mnist.load_dataset()
     print('MAE for all 0 selection:', torch.mean(train_x))
     batch_size = 1000	
+    epochs = 5
     datasize = train_x.shape[0]
     data_dimension = train_x.shape[1]
     
     print("The whole dataset has {} data. The dimension of each data is {}. Batch size is {}.".format(datasize, data_dimension, batch_size))
 
-    # train_x = train_x[:3*batch_size]
-    # train_y = train_y[:3*batch_size]
-    
     dataset = TensorDataset(train_x, train_y)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-    # for project_status in [True, False]:
-    for project_status in [True]:
-        # for experiment in ["multinomial_label", "bernoulli_label", "multinomial", "bernoulli"]:
-        for experiment in ["bernoulli"]:
-            directory = "../results/plots/DBM/"
-            experi_type = experiment
-            if (project_status == True):
-                directory = directory + "UMAP_proj_" + experi_type + "/"
-                # if (experiment == "multinomial" or experiment == "multinomial_label"):
-                #     continue
-            else:
-                directory = directory + "UMAP_" + experi_type + "/"
-            dbn_name = "dbn_" + experi_type + ".pth"
-            filename = "dbm_" + experi_type + ".pth"
-            if not os.path.exists(directory):
-                os.makedirs(directory)
+    for experiment in ["multinomial_label", "bernoulli_label", "multinomial", "bernoulli"]:
+        directory = "../results/plots/DBM/"
+        experi_type = experiment
+        directory = directory + "UMAP_" + experi_type + "/"
+        dbn_name = "dbn_" + experi_type + ".pth"
+        filename = "dbm_" + experi_type + ".pth"
+        if not os.path.exists(directory):
+            os.makedirs(directory)
 
-            if (experiment == "bernoulli"):
-                dbm = DBM(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 10, savefile=filename, mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = False, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
-            elif (experiment == "bernoulli_label"):
-                dbm = DBM(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 10, savefile=filename, mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = True, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
-            elif (experiment == "multinomial"):
-                dbm = DBM(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 10, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = False, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
-            elif (experiment == "multinomial_label"):
-                dbm = DBM(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = 10, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = True, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
-            else:
-                raise ValueError("Invalid Experiment Type")
-            # dbm.load_model(dbn_name)
-            # dbm.train(data_loader)
+        if (experiment == "bernoulli"):
+            dbm = DBM(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = False, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
+        elif (experiment == "bernoulli_label"):
+            dbm = DBM(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = True, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
+        elif (experiment == "multinomial"):
+            dbm = DBM(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = False, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
+        elif (experiment == "multinomial_label"):
+            dbm = DBM(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = True, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
+        else:
+            raise ValueError("Invalid Experiment Type")
+        dbm.load_model(dbn_name)
+        dbm.train(data_loader)
 
-            dbm.load_model(filename)
-
-            latent_loader = dbm.encode(data_loader)
-            new_dir = directory + "final_latent_embedding.png"
-            visualize_data(latent_loader, 3, new_dir, project_status)
-            print("Finished {} Experiment".format(experiment))
+        latent_loader = dbm.encode(data_loader)
+        new_dir = directory + "final_latent_embedding.png"
+        visualize_data(latent_loader, 3, new_dir)
+        print("Finished {} Experiment".format(experiment))
