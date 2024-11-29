@@ -33,11 +33,11 @@ class DBN:
         self.mode = mode
         self.gaussian_top = gaussian_top
         if (top_sigma is None):
-            self.top_sigma = torch.ones((1,), dtype=torch.float32, device=self.device)/10.0
+            self.top_sigma = torch.ones((1,), dtype=torch.float32, device=self.device)/10
         else:
             self.top_sigma = top_sigma.to(torch.float32).to(self.device)
         if (sigma is None):
-            self.sigma = torch.ones((input_size,), dtype=torch.float32, device=self.device)/10.0
+            self.sigma = torch.ones((input_size,), dtype=torch.float32, device=self.device)/10
         else:
             self.sigma = sigma.to(torch.float32).to(self.device)
         self.savefile = savefile
@@ -69,6 +69,8 @@ class DBN:
             p_v_given_h = torch.exp(gaussian_dist.log_prob(variable))
         else:
             raise ValueError("Invalid mode")
+        p_v_given_h = p_v_given_h.float()
+        variable = variable.float()
         return p_v_given_h, variable
     
     def sample_h(self, layer_index: int, x_bottom: torch.Tensor, label: torch.Tensor, top_down_sample: bool=False) -> torch.Tensor:
@@ -92,6 +94,8 @@ class DBN:
         else:
             p_h_given_v = torch.sigmoid(activation)
             variable = torch.bernoulli(p_h_given_v)
+        p_h_given_v = p_h_given_v.float()
+        variable = variable.float()
         return p_h_given_v, variable
     
     def sample_r(self, x_bottom: torch.Tensor) -> torch.Tensor:
@@ -106,6 +110,8 @@ class DBN:
         else:
             p_r_given_h = torch.ones((self.batch_size, 1), dtype=torch.float32, device=self.device)
             variable = torch.ones((self.batch_size, 1), dtype=torch.float32, device=self.device)
+        p_r_given_h = p_r_given_h.float()
+        variable = variable.float()
         return p_r_given_h, variable
         
     def generate_input_for_layer(self, index: int, dataloader: DataLoader) -> DataLoader:
@@ -118,6 +124,7 @@ class DBN:
             return dataloader
         else:
             for batch, label in dataloader:
+                # batch=batch.float()
                 _, x_dash = self.generate_input_dataset_for_layer(index, batch, label)
                 input_layer.append(x_dash)
                 input_labels.append(label)
@@ -178,9 +185,9 @@ class DBN:
             self.top_parameters["tb"] = torch.tensor(rbm.intercept_target_, device=self.device)
 
             print("Finished Training Layer", index, "to", index+1)
-            training_loss = self.calc_training_loss(dataloader, index+1)
-            print("Training Loss of DBN with {} layers:".format(index+1), training_loss)
-            self.depthwise_training_loss.append(training_loss)
+            # training_loss = self.calc_training_loss(dataloader, index+1)
+            # print("Training Loss of DBN with {} layers:".format(index+1), training_loss)
+            # self.depthwise_training_loss.append(training_loss)
             end_time = time.time()
             print("Time taken for training DBN layer", index, "to", index+1, "is", end_time-start_time, "seconds")
             visualize_rbm(rbm, hidden_loader, index, savefig)

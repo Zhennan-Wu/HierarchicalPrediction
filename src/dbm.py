@@ -56,6 +56,8 @@ class DBM(DBN):
         else:
             p_h_given_v = torch.sigmoid(activation)
             variables = torch.bernoulli(p_h_given_v)
+        p_h_given_v = p_h_given_v.float()
+        variables = variables.float()
         return p_h_given_v, variables
 
     def generate_latent_sample_for_layer(self, index: int, dataset: torch.Tensor) -> torch.Tensor:
