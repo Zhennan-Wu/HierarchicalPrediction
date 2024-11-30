@@ -14,7 +14,7 @@ class MNIST:
 		self.max = np.max(x)
 
 	def binarize(self, x):
-		return (x > 0.5).astype(np.float32)
+		return (x > 0.5).astype(np.float64)
 	
 	def transform_normalizer(self, x):
 		return (x - self.min)/(self.max - self.min)
@@ -32,7 +32,7 @@ class MNIST:
 		train_x = train.T[1:].T
 		train_y = train.T[0]
 
-		train_x, test_x = train_x.astype(np.float32), test_x.astype(np.float32)
+		train_x, test_x = train_x.astype(np.float64), test_x.astype(np.float64)
 		self.fit_normalizer(train_x)
 		train_x = self.transform_normalizer(train_x)
 		test_x = self.transform_normalizer(test_x)

@@ -157,13 +157,11 @@ def visualize_rbm(rbm, hidden_loader, level, savefig):
     plt.close()
 
 
-def visualize_data(hidden_loader, level, savefig, project):
+def visualize_data(hidden_loader, level, savefig):
     X_train_bin, y_train = hidden_loader.dataset.tensors
     X_train_embedded = X_train_bin.detach().cpu().numpy()
     y_train = y_train.detach().cpu().numpy()
     y_train_input = y_train.reshape(X_train_bin.shape[0], -1) / 10.0
-    if project:
-        X_train_embedded = project_points_to_simplex(X_train_embedded)
     
     umap = UMAP()
     # Fit and transform the data

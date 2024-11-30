@@ -33,13 +33,13 @@ class DBN:
         self.mode = mode
         self.gaussian_top = gaussian_top
         if (top_sigma is None):
-            self.top_sigma = torch.ones((1,), dtype=torch.float32, device=self.device)/10
+            self.top_sigma = torch.ones((1,), dtype=torch.float64, device=self.device)/10
         else:
-            self.top_sigma = top_sigma.to(torch.float32).to(self.device)
+            self.top_sigma = top_sigma.to(torch.float64).to(self.device)
         if (sigma is None):
-            self.sigma = torch.ones((input_size,), dtype=torch.float32, device=self.device)/10
+            self.sigma = torch.ones((input_size,), dtype=torch.float64, device=self.device)/10
         else:
-            self.sigma = sigma.to(torch.float32).to(self.device)
+            self.sigma = sigma.to(torch.float64).to(self.device)
         self.savefile = savefile
         self.epochs = epochs
         self.multinomial_top = multinomial_top
@@ -69,8 +69,6 @@ class DBN:
             p_v_given_h = torch.exp(gaussian_dist.log_prob(variable))
         else:
             raise ValueError("Invalid mode")
-        p_v_given_h = p_v_given_h.float()
-        variable = variable.float()
         return p_v_given_h, variable
     
     def sample_h(self, layer_index: int, x_bottom: torch.Tensor, label: torch.Tensor, top_down_sample: bool=False) -> torch.Tensor:
@@ -94,8 +92,6 @@ class DBN:
         else:
             p_h_given_v = torch.sigmoid(activation)
             variable = torch.bernoulli(p_h_given_v)
-        p_h_given_v = p_h_given_v.float()
-        variable = variable.float()
         return p_h_given_v, variable
     
     def sample_r(self, x_bottom: torch.Tensor) -> torch.Tensor:
@@ -108,10 +104,8 @@ class DBN:
             variable = gaussian_dist.sample()
             p_r_given_h = torch.exp(gaussian_dist.log_prob(variable))
         else:
-            p_r_given_h = torch.ones((self.batch_size, 1), dtype=torch.float32, device=self.device)
-            variable = torch.ones((self.batch_size, 1), dtype=torch.float32, device=self.device)
-        p_r_given_h = p_r_given_h.float()
-        variable = variable.float()
+            p_r_given_h = torch.ones((self.batch_size, 1), dtype=torch.float64, device=self.device)
+            variable = torch.ones((self.batch_size, 1), dtype=torch.float64, device=self.device)
         return p_r_given_h, variable
         
     def generate_input_for_layer(self, index: int, dataloader: DataLoader) -> DataLoader:
@@ -144,14 +138,14 @@ class DBN:
             x_gen = []
             for _ in range(self.k):
                 x_dash = dataset.to(self.device)
-                label = label.unsqueeze(1).to(torch.float32).to(self.device)
+                label = label.unsqueeze(1).to(torch.float64).to(self.device)
                 for i in range(index):  
                     p_x, x_dash = self.sample_h(i, x_dash, label)
                 x_gen.append(p_x)
             x_dash = torch.stack(x_gen)
             x_dash = torch.mean(x_dash, dim=0)
             x_binary = torch.bernoulli(x_dash)
-            return x_dash, x_binary.to(torch.float32).to(self.device)
+            return x_dash, x_binary.to(torch.float64).to(self.device)
     
     def train(self, dataloader: DataLoader, savefig: str = None):
         """
@@ -175,14 +169,14 @@ class DBN:
             hidden_loader = self.generate_input_for_layer(index, dataloader)
 
             rbm.fit_dataloader(hidden_loader, vn, 1, self.multinomial_sample_size, self.disc_alpha)
-            self.layer_parameters[index]["W"] = torch.tensor(rbm.components_, device=self.device)
-            self.layer_parameters[index]["hb"] = torch.tensor(rbm.intercept_hidden_, device=self.device)
+            self.layer_parameters[index]["W"] = torch.tensor(rbm.components_, dtype=torch.float64, device=self.device)
+            self.layer_parameters[index]["hb"] = torch.tensor(rbm.intercept_hidden_, dtype=torch.float64, device=self.device)
             if (index == 0):
-                self.visible_bias = torch.tensor(rbm.intercept_visible_, device=self.device)
+                self.visible_bias = torch.tensor(rbm.intercept_visible_, dtype=torch.float64, device=self.device)
             else:
-                self.layer_parameters[index-1]["hb"] = torch.tensor(rbm.intercept_visible_, device=self.device)
-            self.top_parameters["W"] = torch.tensor(rbm.target_components_, device=self.device)
-            self.top_parameters["tb"] = torch.tensor(rbm.intercept_target_, device=self.device)
+                self.layer_parameters[index-1]["hb"] = torch.tensor(rbm.intercept_visible_, dtype=torch.float64, device=self.device)
+            self.top_parameters["W"] = torch.tensor(rbm.target_components_, dtype=torch.float64, device=self.device)
+            self.top_parameters["tb"] = torch.tensor(rbm.intercept_target_, dtype=torch.float64, device=self.device)
 
             print("Finished Training Layer", index, "to", index+1)
             # training_loss = self.calc_training_loss(dataloader, index+1)
@@ -222,10 +216,10 @@ class DBN:
     def calc_training_loss(self, dataloader: DataLoader, depth: int):
         '''
         '''
-        train_loss = torch.tensor([0.], device=self.device)
+        train_loss = torch.tensor([0.], dtype=torch.float64, device=self.device)
         for batch_data, label in dataloader:
             v_original = batch_data.to(self.device)
-            label = label.unsqueeze(1).to(torch.float32).to(self.device)
+            label = label.unsqueeze(1).to(torch.float64).to(self.device)
             v_reconstruct, _ = self.reconstructor(v_original, label, depth)
             train_loss += torch.mean(torch.abs(v_original - v_reconstruct))
         return train_loss.item()
@@ -271,7 +265,7 @@ class DBN:
         data_labels = []
         for batch, label in dataloader:
             batch = batch.to(self.device)
-            label = label.unsqueeze(1).to(torch.float32).to(self.device)
+            label = label.unsqueeze(1).to(torch.float64).to(self.device)
             visible, latent = self.reconstructor(batch, label, depth)
             visible_data.append(visible)
             latent_vars.append(latent)
@@ -309,7 +303,7 @@ class DBN:
         labels = []
         for data, label in dataloader:
             data = data.to(self.device)
-            label = label.unsqueeze(1).to(torch.float32).to(self.device)
+            label = label.unsqueeze(1).to(torch.float64).to(self.device)
             latent_vars.append(self.encoder(data, label, depth))
             labels.append(label)
         latent_vars = torch.cat(latent_vars, dim=0)

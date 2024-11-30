@@ -350,6 +350,11 @@ class RBM(BernoulliRBM):
         
         if (self.latent_dist == 'multinomial'):
             assert np.allclose(h_neg.sum(axis=1), 1), "Rows of p must be normalized, instead get {}".format(h_neg.sum(axis=1))
+            check_sum = np.sum(h_neg, axis=1)
+            non_ones = check_sum[~np.isclose(check_sum, 1.0, atol=1e-6)]
+            if non_ones.size > 0:
+                print("Matrix contains non-1 values:", non_ones)
+                raise ValueError("Matrix contains values other than 1!")
             self.h_samples_ = [rng.multinomial(self.sample_size, pval) for pval in h_neg]
             self.h_samples_ = np.array(self.h_samples_)
         elif (self.latent_dist == 'bernoulli'):
@@ -416,8 +421,8 @@ class RBM(BernoulliRBM):
         self : BernoulliRBM
             The fitted model.
         """
-        X = self._validate_data(X, accept_sparse="csr", dtype=(np.float64, np.float32))
-        y = self._validate_data(y, accept_sparse="csr", dtype=(np.float64, np.float32))
+        X = self._validate_data(X, accept_sparse="csr", dtype=(np.float64, np.float64))
+        y = self._validate_data(y, accept_sparse="csr", dtype=(np.float64, np.float64))
         n_samples = X.shape[0]
         
         rng = check_random_state(self.random_state)
@@ -489,24 +494,24 @@ class RBM(BernoulliRBM):
         self.components_ = np.asarray(
             rng.normal(0, 0.01, (self.n_components, v_dim)),
             order="F",
-            dtype=np.float32,
+            dtype=np.float64,
         )
         self.sigma = 0.1
         self.target_sigma = 0.1
         self.target_components_ = np.asarray(
             rng.normal(0, 0.01, (t_dim, self.n_components)),
             order="F",
-            dtype=np.float32,
+            dtype=np.float64,
         )
             
-        self.intercept_target_ = np.zeros(t_dim, dtype=np.float32)
+        self.intercept_target_ = np.zeros(t_dim, dtype=np.float64)
         self._n_features_out = self.components_.shape[0]
-        self.intercept_hidden_ = np.zeros(self.n_components, dtype=np.float32)
+        self.intercept_hidden_ = np.zeros(self.n_components, dtype=np.float64)
         if (visible_bias is not None):
             self.intercept_visible_ = visible_bias
         else:
-            self.intercept_visible_ = np.zeros(v_dim, dtype=np.float32)
-        self.h_samples_ = np.zeros((dataloader.batch_size, self.n_components), dtype=np.float32)
+            self.intercept_visible_ = np.zeros(v_dim, dtype=np.float64)
+        self.h_samples_ = np.zeros((dataloader.batch_size, self.n_components), dtype=np.float64)
 
         verbose = self.verbose
         begin = time.time()

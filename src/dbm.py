@@ -56,8 +56,6 @@ class DBM(DBN):
         else:
             p_h_given_v = torch.sigmoid(activation)
             variables = torch.bernoulli(p_h_given_v)
-        p_h_given_v = p_h_given_v.float()
-        variables = variables.float()
         return p_h_given_v, variables
 
     def generate_latent_sample_for_layer(self, index: int, dataset: torch.Tensor) -> torch.Tensor:
@@ -137,7 +135,7 @@ class DBM(DBN):
         Calculate the Evidence Lower Bound (ELBO) of the data
         '''
         with torch.no_grad():
-            elbo = torch.tensor(0., device=self.device)
+            elbo = torch.tensor(0., dtype=torch.float64, device=self.device)
             for index in range(len(self.layers)-1):
                 elbo += torch.sum(torch.matmul(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"])*self.layer_mean_field_parameters[index]["mu"])
                 if (self.bias):
@@ -198,7 +196,7 @@ class DBM(DBN):
                 if (index == 0):
                     variables[index].append(data)
                 elif (index == len(self.layers)+1):
-                    variables[index].append(label.to(torch.float32).unsqueeze(1))
+                    variables[index].append(label.to(torch.float64).unsqueeze(1))
                 else:
                     variables[index].append(self.generate_latent_sample_for_layer(index, data))
         
@@ -214,8 +212,8 @@ class DBM(DBN):
         for epoch in learning:
             with torch.no_grad():
                 start_time = time.time()
-                train_loss = torch.tensor([0.], device=self.device)
-                regression_loss = torch.tensor([0.], device=self.device)
+                train_loss = torch.tensor([0.], dtype=torch.float64, device=self.device)
+                regression_loss = torch.tensor([0.], dtype=torch.float64, device=self.device)
                 counter = 0
                 mcmc_loader = self.gibbs_update_dataloader(mcmc_loader, gibbs_iterations)
                 disc_loader = self.gibbs_update_dataloader(disc_loader, gibbs_iterations, discriminator=False)
@@ -223,7 +221,7 @@ class DBM(DBN):
                 dataset_index = 0
                 for dataset, mcmc_samples, disc_samples in zip(dataloader, mcmc_loader, disc_loader):
                     elbos = []
-                    label = dataset[1].unsqueeze(1).to(torch.float32).to(self.device)
+                    label = dataset[1].unsqueeze(1).to(torch.float64).to(self.device)
                     dataset = dataset[0].to(self.device)
                     mcmc_samples = [sample.to(self.device) for sample in mcmc_samples]
                     disc_samples = [sample.to(self.device) for sample in disc_samples]
