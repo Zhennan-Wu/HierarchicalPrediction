@@ -389,7 +389,7 @@ if __name__ == "__main__":
     train_x, train_y, test_x, test_y = mnist.load_dataset()
     print('MAE for all 0 selection:', torch.mean(train_x))
     batch_size = 1000	
-    epochs = 5
+    epochs = 500
     datasize = train_x.shape[0]
     data_dimension = train_x.shape[1]
     

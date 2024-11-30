@@ -39,7 +39,7 @@ class DBM(DBN):
         if (x_top is not None):
             x_top = x_top.to(self.device)
         else:
-            x_top = torch.zeros((1, W_top.size(0)), device=self.device)
+            x_top = torch.zeros((1, W_top.size(0)), dtype = torch.float64, device=self.device)
 
         if (layer_index == 0):
             activation = torch.matmul(x_bottom/(self.sigma**2), W_bottom.t()) + torch.matmul(x_top, W_top) + bias
@@ -56,6 +56,8 @@ class DBM(DBN):
         else:
             p_h_given_v = torch.sigmoid(activation)
             variables = torch.bernoulli(p_h_given_v)
+        p_h_given_v = p_h_given_v.to(torch.float64)
+        variables = variables.to(torch.float64)
         return p_h_given_v, variables
 
     def generate_latent_sample_for_layer(self, index: int, dataset: torch.Tensor) -> torch.Tensor:
@@ -226,7 +228,7 @@ class DBM(DBN):
                     mcmc_samples = [sample.to(self.device) for sample in mcmc_samples]
                     disc_samples = [sample.to(self.device) for sample in disc_samples]
                     for index, _ in enumerate(self.layers):
-                        unnormalized_mf_param = torch.rand((self.batch_size, self.layers[index]), device = self.device)
+                        unnormalized_mf_param = torch.rand((self.batch_size, self.layers[index]), dtype=torch.float64, device = self.device)
                         self.layer_mean_field_parameters[index]["mu"] = unnormalized_mf_param/torch.sum(unnormalized_mf_param, dim=1).unsqueeze(1)
 
                     mf_step = 0
@@ -344,7 +346,7 @@ if __name__ == "__main__":
     train_x, train_y, test_x, test_y = mnist.load_dataset()
     print('MAE for all 0 selection:', torch.mean(train_x))
     batch_size = 1000	
-    epochs = 5
+    epochs = 500
     datasize = train_x.shape[0]
     data_dimension = train_x.shape[1]
     
@@ -372,7 +374,7 @@ if __name__ == "__main__":
         else:
             raise ValueError("Invalid Experiment Type")
         dbm.load_model(dbn_name)
-        dbm.train(data_loader)
+        dbm.train(data_loader, gibbs_iterations=200, mf_maximum_steps=30, mf_threshold=0.1, convergence_consecutive_hits=3)
 
         latent_loader = dbm.encode(data_loader)
         new_dir = directory + "final_latent_embedding.png"
