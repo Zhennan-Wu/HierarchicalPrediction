@@ -399,7 +399,8 @@ if __name__ == "__main__":
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     for experiment in ["multinomial_label", "bernoulli_label", "multinomial", "bernoulli"]:
-        directory = "../results/plots/DBN/"
+    # for experiment in ["multinomial"]:
+        directory = "../results/plots/DBN/epoch_1000/"
         experi_type = experiment
         directory = directory + "UMAP_" + experi_type + "/"
         filename = "dbn_" + experi_type + ".pth"
@@ -416,6 +417,7 @@ if __name__ == "__main__":
             dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = True, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
         else:
             raise ValueError("Invalid Experiment Type")
+        dbn.load_model(filename)
         dbn.train(data_loader, directory)
 
         from sklearn.cluster import KMeans

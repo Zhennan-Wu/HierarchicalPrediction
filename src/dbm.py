@@ -327,7 +327,7 @@ class DBM(DBN):
                 end_time = time.time()
                 print("Time taken for DBM epoch {} is {}".format(epoch, end_time-start_time))
                 if (epoch%50 == 0):
-                    savefile = "dbm_epoch_{}.pth".format(epoch)
+                    savefile = self.savefile.replace(".pth", "_epoch_{}.pth".format(epoch))
                     self.save_model(savefile)
                     print("Model saved at epoch", epoch)
                 if (epoch%10 == 0):
