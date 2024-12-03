@@ -389,7 +389,7 @@ if __name__ == "__main__":
     train_x, train_y, test_x, test_y = mnist.load_dataset()
     print('MAE for all 0 selection:', torch.mean(train_x))
     batch_size = 1000	
-    epochs = 500
+    epochs = 1000
     datasize = train_x.shape[0]
     data_dimension = train_x.shape[1]
     
@@ -400,7 +400,7 @@ if __name__ == "__main__":
 
     for experiment in ["multinomial_label", "bernoulli_label", "multinomial", "bernoulli"]:
     # for experiment in ["multinomial"]:
-        directory = "../results/plots/DBN/epoch_1000/"
+        directory = "../results/plots/DBN/epoch_2000/"
         experi_type = experiment
         directory = directory + "UMAP_" + experi_type + "/"
         filename = "dbn_" + experi_type + ".pth"

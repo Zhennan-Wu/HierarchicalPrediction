@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J dbn_epoch_1000
+#SBATCH -J dbn_epoch_2000
 #SBATCH -p gpu
 #SBATCH -o ../outputs/output_%j.txt
 #SBATCH -e ../outputs/error_%j.err
