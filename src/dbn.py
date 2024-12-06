@@ -413,7 +413,7 @@ if __name__ == "__main__":
     print('MAE for all 0 selection:', torch.mean(train_x))
     batch_size = 1000	
     prev_cumu_epochs = 0
-    epochs = 100
+    epochs = 500
     datasize = train_x.shape[0]
     data_dimension = train_x.shape[1]
     gaussian_middle = True
