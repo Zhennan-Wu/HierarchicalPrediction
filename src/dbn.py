@@ -17,7 +17,7 @@ class DBN:
     """
     Deep Belief Network
     """
-    def __init__(self, input_size: int, layers: list, batch_size: int, epochs: int = 10, savefile: str = None, mode: str = "bernoulli", multinomial_top: bool=False, multinomial_sample_size: int=0, bias: bool = False, k: int = 5, gaussian_top = False, top_sigma: torch.Tensor = None, sigma: torch.Tensor = None, disc_alpha: float = 1.):
+    def __init__(self, input_size: int, layers: list, batch_size: int, epochs: int = 10, savefile: str = None, mode: str = "bernoulli", multinomial_top: bool=False, multinomial_sample_size: int=0, bias: bool = False, k: int = 5, gaussian_top = False, top_sigma: torch.Tensor = None, sigma: torch.Tensor = None, disc_alpha: float = 1., gaussian_middle = False):
         if (torch.cuda.is_available()):
             self.device = torch.device("cuda")
         else:
@@ -31,13 +31,14 @@ class DBN:
         self.visible_bias = None
         self.k = k
         self.mode = mode
+        self.gaussian_middle = gaussian_middle
         self.gaussian_top = gaussian_top
         if (top_sigma is None):
-            self.top_sigma = torch.ones((1,), dtype=torch.float64, device=self.device)/10
+            self.top_sigma = torch.ones((1,), dtype=torch.float64, device=self.device)/10.
         else:
             self.top_sigma = top_sigma.to(torch.float64).to(self.device)
         if (sigma is None):
-            self.sigma = torch.ones((input_size,), dtype=torch.float64, device=self.device)/10
+            self.sigma = torch.ones((input_size,), dtype=torch.float64, device=self.device)/10.
         else:
             self.sigma = sigma.to(torch.float64).to(self.device)
         self.savefile = savefile
@@ -118,12 +119,17 @@ class DBN:
             return dataloader
         else:
             for batch, label in dataloader:
-                # batch=batch.float()
-                _, x_dash = self.generate_input_dataset_for_layer(index, batch, label)
+                if (self.gaussian_middle):
+                    x_dash, _ = self.generate_input_dataset_for_layer(index, batch, label)
+
+                else:
+                    _, x_dash = self.generate_input_dataset_for_layer(index, batch, label)
                 input_layer.append(x_dash)
                 input_labels.append(label)
             input_data = torch.cat(input_layer, dim=0)
             input_labels = torch.cat(input_labels, dim=0)
+            if not torch.all((input_data >= 0) & (input_data <= 1)):
+                raise ValueError("Tensor contains elements outside the range [0, 1].")
             dataset = TensorDataset(input_data, input_labels)
             hidden_loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
             return hidden_loader
@@ -145,7 +151,10 @@ class DBN:
             x_dash = torch.stack(x_gen)
             x_dash = torch.mean(x_dash, dim=0)
             x_binary = torch.bernoulli(x_dash)
-            return x_dash, x_binary.to(torch.float64).to(self.device)
+
+            if not torch.all((x_dash >= 0) & (x_dash <= 1)):
+                raise ValueError("Tensor contains elements outside the range [0, 1].")
+            return x_dash.to(torch.float64).to(self.device), x_binary.to(torch.float64).to(self.device)
     
     def train(self, dataloader: DataLoader, savefig: str = None):
         """
@@ -158,17 +167,25 @@ class DBN:
             else:
                 vn = self.layers[index-1]
             hn = self.layers[index]
-            mode = self.mode
+            if (self.gaussian_middle):
+                if (index == 0):
+                    input_mode = self.mode
+                else:
+                    input_mode = "gaussian"
+            else:
+                input_mode = self.mode
             target_status = False
             if (index == len(self.layers)-1):
                 target_status = self.gaussian_top
                 if (self.multinomial_top):
-                    mode = "multinomial"
-            rbm = RBM(n_components=hn, learning_rate=0.1, batch_size=self.batch_size, n_iter=self.epochs, verbose=0, add_bias=self.bias, target_in_model=target_status, hybrid=False, input_dist=self.mode, latent_dist=mode, target_dist='gaussian')
+                    output_mode = "multinomial"
+            else:
+                output_mode = "bernoulli"
+            rbm = RBM(n_components=hn, learning_rate=0.1, batch_size=self.batch_size, n_iter=self.epochs, verbose=0, add_bias=self.bias, target_in_model=target_status, hybrid=False, input_dist=input_mode, latent_dist=output_mode, target_dist='gaussian')
 
             hidden_loader = self.generate_input_for_layer(index, dataloader)
 
-            rbm.fit_dataloader(hidden_loader, vn, 1, self.multinomial_sample_size, self.disc_alpha)
+            rbm.fit_dataloader(hidden_loader, vn, 1, self.multinomial_sample_size, torch.mean(self.sigma).item(), torch.mean(self.top_sigma).item(), self.disc_alpha)
             self.layer_parameters[index]["W"] = torch.tensor(rbm.components_, dtype=torch.float64, device=self.device)
             self.layer_parameters[index]["hb"] = torch.tensor(rbm.intercept_hidden_, dtype=torch.float64, device=self.device)
             if (index == 0):
@@ -385,13 +402,21 @@ class DBN:
 
 
 if __name__ == "__main__":
+    import warnings
+    warnings.simplefilter("error", RuntimeWarning)
+
+    # Run your code here
+
     mnist = MNIST()
     train_x, train_y, test_x, test_y = mnist.load_dataset()
+    train_y = train_y/10.
     print('MAE for all 0 selection:', torch.mean(train_x))
     batch_size = 1000	
-    epochs = 1000
+    prev_cumu_epochs = 0
+    epochs = 100
     datasize = train_x.shape[0]
     data_dimension = train_x.shape[1]
+    gaussian_middle = True
     
     print("The whole dataset has {} data. The dimension of each data is {}. Batch size is {}.".format(datasize, data_dimension, batch_size))
     
@@ -399,25 +424,24 @@ if __name__ == "__main__":
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     for experiment in ["multinomial_label", "bernoulli_label", "multinomial", "bernoulli"]:
-    # for experiment in ["multinomial"]:
-        directory = "../results/plots/DBN/epoch_2000/"
+        directory = "../results/plots/DBN_GM/epoch_{}/".format(epochs + prev_cumu_epochs)
         experi_type = experiment
         directory = directory + "UMAP_" + experi_type + "/"
-        filename = "dbn_" + experi_type + ".pth"
+        filename = "dbn_gm_" + experi_type + ".pth"
         if not os.path.exists(directory):
             os.makedirs(directory)
 
         if (experiment == "bernoulli"):
-            dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = False, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
+            dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = False, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1., gaussian_middle = gaussian_middle)
         elif (experiment == "bernoulli_label"):
-            dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = True, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
+            dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = True, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1., gaussian_middle = gaussian_middle)
         elif (experiment == "multinomial"):
-            dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = False, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
+            dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = False, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1., gaussian_middle = gaussian_middle)
         elif (experiment == "multinomial_label"):
-            dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = True, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1.)
+            dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = True, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1., gaussian_middle = gaussian_middle)
         else:
             raise ValueError("Invalid Experiment Type")
-        dbn.load_model(filename)
+        # dbn.load_model(filename)
         dbn.train(data_loader, directory)
 
         from sklearn.cluster import KMeans

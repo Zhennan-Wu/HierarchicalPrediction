@@ -140,7 +140,7 @@ class RBM(BernoulliRBM):
 
         return p
     
-    def _sample_visibles(self, h, rng):
+    def _sample_visibles(self, h, rng, lower_bound=0, upper_bound=1):
         """Sample from the distribution P(v|h).
 
         Parameters
@@ -163,6 +163,7 @@ class RBM(BernoulliRBM):
             samples = rng.uniform(size=p.shape) < p
         else:
             raise ValueError("Invalid input distribution: {}".format(self.input_dist))
+        samples = np.clip(samples, lower_bound, upper_bound)
         return samples
 
     def _mean_targets(self, h):
@@ -187,7 +188,7 @@ class RBM(BernoulliRBM):
             raise ValueError("Invalid target distribution: {}".format(self.target_dist))
         return p
     
-    def _sample_targets(self, h, rng):
+    def _sample_targets(self, h, rng, lower_bound=0, upper_bound=1):
         """Sample from the distribution P(t|h).
 
         Parameters
@@ -208,6 +209,7 @@ class RBM(BernoulliRBM):
             samples = rng.normal(p, self.target_sigma, size=p.shape)
         else:
             raise ValueError("Invalid target distribution: {}".format(self.target_dist))
+        samples = np.clip(samples, lower_bound, upper_bound)
         return samples
     
     def _free_energy(self, v, t):
@@ -339,7 +341,8 @@ class RBM(BernoulliRBM):
         ) * self.hybrid_alpha
 
         if (self.target_in_model):
-            target_lr = lr/100.
+            # target_lr = lr/100.
+            target_lr = lr
             update_target = safe_sparse_dot(h_pos.T, t_pos/self.target_sigma, dense_output=True).T
             update_target -= np.dot(h_neg.T, t_neg/self.target_sigma).T
             self.target_components_ += target_lr * update_target * self.hybrid_alpha
@@ -406,7 +409,7 @@ class RBM(BernoulliRBM):
         return -v.shape[1] * np.logaddexp(0, -(fe_ - fe))
 
     @_fit_context(prefer_skip_nested_validation=True)
-    def fit(self, X, y, sample_size=100, hybrid_alpha=1.):
+    def fit(self, X, y, sample_size=100, sigma = 0.1, target_sigma = 0.1, hybrid_alpha=1.):
         """Fit the model to the data X.
 
         Parameters
@@ -421,8 +424,8 @@ class RBM(BernoulliRBM):
         self : BernoulliRBM
             The fitted model.
         """
-        X = self._validate_data(X, accept_sparse="csr", dtype=(np.float64, np.float64))
-        y = self._validate_data(y, accept_sparse="csr", dtype=(np.float64, np.float64))
+        X = self._validate_data(X, accept_sparse="csr", dtype=np.float64)
+        y = self._validate_data(y, accept_sparse="csr", dtype=np.float64)
         n_samples = X.shape[0]
         
         rng = check_random_state(self.random_state)
@@ -433,8 +436,8 @@ class RBM(BernoulliRBM):
             order="F",
             dtype=X.dtype,
         )
-        self.sigma = 0.5
-        self.target_sigma = 0.5
+        self.sigma = sigma
+        self.target_sigma = target_sigma
         self.hybrid_alpha = hybrid_alpha
         self.target_components_ = np.asarray(
             rng.normal(0, 0.01, (y.shape[1], self.n_components)),
@@ -472,7 +475,7 @@ class RBM(BernoulliRBM):
 
         return self
 
-    def fit_dataloader(self, dataloader, v_dim, t_dim, visible_bias=None, sample_size=100, hybrid_alpha=1.):
+    def fit_dataloader(self, dataloader, v_dim, t_dim, visible_bias=None, sample_size=100, sigma=0.1, target_sigma=0.1, hybrid_alpha=1.):
         """Fit the model to the data X.
 
         Parameters
@@ -496,8 +499,8 @@ class RBM(BernoulliRBM):
             order="F",
             dtype=np.float64,
         )
-        self.sigma = 0.1
-        self.target_sigma = 0.1
+        self.sigma = sigma
+        self.target_sigma = target_sigma
         self.target_components_ = np.asarray(
             rng.normal(0, 0.01, (t_dim, self.n_components)),
             order="F",
