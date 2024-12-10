@@ -412,7 +412,7 @@ if __name__ == "__main__":
     train_y = train_y/10.
     print('MAE for all 0 selection:', torch.mean(train_x))
     batch_size = 1000	
-    prev_cumu_epochs = 0
+    prev_cumu_epochs = 500
     epochs = 500
     datasize = train_x.shape[0]
     data_dimension = train_x.shape[1]
@@ -441,7 +441,7 @@ if __name__ == "__main__":
             dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = True, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1., gaussian_middle = gaussian_middle)
         else:
             raise ValueError("Invalid Experiment Type")
-        # dbn.load_model(filename)
+        dbn.load_model(filename)
         dbn.train(data_loader, directory)
 
         from sklearn.cluster import KMeans

@@ -1,0 +1,34 @@
+MAE for all 0 selection: tensor(0.1323, dtype=torch.float64)
+The whole dataset has 60000 data. The dimension of each data is 784. Batch size is 1000.
+Finished Training Layer 0 to 1
+Time taken for training DBN layer 0 to 1 is 2276.9421861171722 seconds
+Finished Training Layer 1 to 2
+Time taken for training DBN layer 1 to 2 is 1527.2854664325714 seconds
+Finished Training Layer 2 to 3
+Time taken for training DBN layer 2 to 3 is 956.0790476799011 seconds
+The last layer will not be activated. The rest are activated using the Sigmoid function.
+Finished multinomial_label Experiment
+Finished Training Layer 0 to 1
+Time taken for training DBN layer 0 to 1 is 2370.294639110565 seconds
+Finished Training Layer 1 to 2
+Time taken for training DBN layer 1 to 2 is 1523.9951665401459 seconds
+Finished Training Layer 2 to 3
+Time taken for training DBN layer 2 to 3 is 836.4507832527161 seconds
+The last layer will not be activated. The rest are activated using the Sigmoid function.
+Finished bernoulli_label Experiment
+Finished Training Layer 0 to 1
+Time taken for training DBN layer 0 to 1 is 2301.4177074432373 seconds
+Finished Training Layer 1 to 2
+Time taken for training DBN layer 1 to 2 is 1537.1533598899841 seconds
+Finished Training Layer 2 to 3
+Time taken for training DBN layer 2 to 3 is 933.2186939716339 seconds
+The last layer will not be activated. The rest are activated using the Sigmoid function.
+Finished multinomial Experiment
+Finished Training Layer 0 to 1
+Time taken for training DBN layer 0 to 1 is 2318.7049248218536 seconds
+Finished Training Layer 1 to 2
+Time taken for training DBN layer 1 to 2 is 1521.4537205696106 seconds
+Finished Training Layer 2 to 3
+Time taken for training DBN layer 2 to 3 is 810.4272570610046 seconds
+The last layer will not be activated. The rest are activated using the Sigmoid function.
+Finished bernoulli Experiment
