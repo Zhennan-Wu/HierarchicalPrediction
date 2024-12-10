@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J dbn_gm_epoch_100
+#SBATCH -J dbn_gm_epoch_1000
 #SBATCH -p gpu
 #SBATCH -o ../outputs/output_%j.txt
 #SBATCH -e ../outputs/error_%j.err
@@ -9,7 +9,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
-#SBATCH --time=2-00:00:00
+#SBATCH --time=10:00:00
 #SBATCH --mem=32G
 #SBATCH -A r00939
 
