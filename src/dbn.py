@@ -67,25 +67,34 @@ class DBN:
             gaussian_dist = torch.distributions.normal.Normal(activation, self.sigma)
             variable = gaussian_dist.sample()
             # Do not need p_v_given_h, otherwise it will not be correct
-            p_v_given_h = torch.exp(gaussian_dist.log_prob(variable))
+            # p_v_given_h = torch.exp(gaussian_dist.log_prob(variable))
+            p_v_given_h = None
         else:
             raise ValueError("Invalid mode")
         return p_v_given_h, variable
     
-    def sample_h(self, layer_index: int, x_bottom: torch.Tensor, label: torch.Tensor, top_down_sample: bool=False) -> torch.Tensor:
+    def sample_h(self, layer_index: int, x_bottom: torch.Tensor, label: torch.Tensor, input_mode: str, top_down_sample: bool=False) -> torch.Tensor:
         """
         Sample hidden units given visible units
         """
         W_bottom = self.layer_parameters[layer_index]["W"]
         bias = self.layer_parameters[layer_index]["hb"]
         if (layer_index == 0):
-            activation = torch.matmul(x_bottom/(self.sigma**2), W_bottom.t()) + bias
+            if (input_mode == "gaussian"):
+                activation = torch.matmul(x_bottom/(self.sigma**2), W_bottom.t()) + bias
+            else:
+                activation = torch.matmul(x_bottom, W_bottom.t()) + bias
         else:    
-            activation =torch.matmul(x_bottom, W_bottom.t()) + bias 
+            logistic_sigma = torch.ones((1,), dtype=torch.float64, device=self.device)/10.
+            if (input_mode == "gaussian"):
+                activation = torch.matmul(x_bottom/(logistic_sigma**2), W_bottom.t()) + bias
+            else:
+                activation = torch.matmul(x_bottom, W_bottom.t()) + bias
 
         if (layer_index == len(self.layers)-1 and self.multinomial_top):
             if (top_down_sample):
-                activation = activation + torch.matmul(label/(self.top_sigma**2), self.top_parameters["W"])
+                if (self.gaussian_top):
+                    activation = activation + torch.matmul(label/(self.top_sigma**2), self.top_parameters["W"])
             p_h_given_v = torch.softmax(activation, dim=1)
             indices = torch.multinomial(p_h_given_v, self.multinomial_sample_size, replacement=True)
             one_hot = torch.zeros(p_h_given_v.size(0), self.multinomial_sample_size, p_h_given_v.size(1), device=self.device).scatter_(2, indices.unsqueeze(-1), 1)
@@ -103,13 +112,15 @@ class DBN:
             mean = torch.mm(x_bottom/(self.top_sigma**2), self.top_parameters["W"].t()) + self.top_parameters["tb"]
             gaussian_dist = torch.distributions.normal.Normal(mean, self.top_sigma)
             variable = gaussian_dist.sample()
-            p_r_given_h = torch.exp(gaussian_dist.log_prob(variable))
+            # p_r_given_h = torch.exp(gaussian_dist.log_prob(variable))
+            p_r_given_h = None
         else:
-            p_r_given_h = torch.ones((self.batch_size, 1), dtype=torch.float64, device=self.device)
-            variable = torch.ones((self.batch_size, 1), dtype=torch.float64, device=self.device)
+            raise ValueError("Should not sample r in this case")
+            # p_r_given_h = torch.ones((self.batch_size, 1), dtype=torch.float64, device=self.device)
+            # variable = torch.ones((self.batch_size, 1), dtype=torch.float64, device=self.device)
         return p_r_given_h, variable
         
-    def generate_input_for_layer(self, index: int, dataloader: DataLoader) -> DataLoader:
+    def generate_input_for_layer(self, index: int, dataloader: DataLoader, pretrain: bool=True) -> DataLoader:
         """
         Generate input for layer
         """
@@ -119,12 +130,11 @@ class DBN:
             return dataloader
         else:
             for batch, label in dataloader:
-                if (self.gaussian_middle):
-                    x_dash, _ = self.generate_input_dataset_for_layer(index, batch, label)
-
+                p_x_dash, x_dash = self.generate_input_dataset_for_layer(index, batch, label)
+                if (pretrain):
+                    input_layer.append(p_x_dash)
                 else:
-                    _, x_dash = self.generate_input_dataset_for_layer(index, batch, label)
-                input_layer.append(x_dash)
+                    input_layer.append(x_dash)
                 input_labels.append(label)
             input_data = torch.cat(input_layer, dim=0)
             input_labels = torch.cat(input_labels, dim=0)
@@ -146,7 +156,10 @@ class DBN:
                 x_dash = dataset.to(self.device)
                 label = label.unsqueeze(1).to(torch.float64).to(self.device)
                 for i in range(index):  
-                    p_x, x_dash = self.sample_h(i, x_dash, label)
+                    if (i == 0):
+                        p_x, x_dash = self.sample_h(i, x_dash, label, self.mode)
+                    else:
+                        p_x, x_dash = self.sample_h(i, p_x, label, "gaussian")
                 x_gen.append(p_x)
             x_dash = torch.stack(x_gen)
             x_dash = torch.mean(x_dash, dim=0)
@@ -251,11 +264,15 @@ class DBN:
         for _ in range(self.k):
             x_dash = x.clone()
             for i in range(depth):
+                if (i == 0):
+                    input_mode = self.mode
+                else:
+                    input_mode = "bernoulli"
                 if (i == len(self.layers)-1 and self.gaussian_top):
                     top_down_sample = True
-                    p_x, x_dash = self.sample_h(i, x_dash, y, top_down_sample)
+                    p_x, x_dash = self.sample_h(i, x_dash, y, input_mode, top_down_sample)
                 else:
-                    p_x, x_dash = self.sample_h(i, x_dash, y)
+                    p_x, x_dash = self.sample_h(i, x_dash, y, input_mode)
             x_gen.append(p_x)
         x_dash = torch.stack(x_gen)
         x_dash = torch.mean(x_dash, dim=0)
@@ -302,7 +319,7 @@ class DBN:
         W_bottom = self.layer_parameters[depth-1]["W"].to(self.device)
         b_bottom = self.layer_parameters[depth-1]["hb"].to(self.device)
         activation = torch.matmul(x_bottom, W_bottom.t()) + b_bottom 
-        if (depth == len(self.layers)):
+        if (depth == len(self.layers) and self.gaussian_top):
             activation = activation + torch.matmul(label/(self.top_sigma**2), self.top_parameters["W"].to(self.device)) + self.top_parameters["tb"].to(self.device)
         if (self.multinomial_top):
             p_h_given_v = torch.softmax(activation, dim=1)      
@@ -424,7 +441,7 @@ if __name__ == "__main__":
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     for experiment in ["multinomial_label", "bernoulli_label", "multinomial", "bernoulli"]:
-        directory = "../results/plots/DBN_GM/epoch_{}/".format(epochs + prev_cumu_epochs)
+        directory = "../results/plots/DBN_GM_new/epoch_{}/".format(epochs + prev_cumu_epochs)
         experi_type = experiment
         directory = directory + "UMAP_" + experi_type + "/"
         filename = "dbn_gm_" + experi_type + ".pth"
