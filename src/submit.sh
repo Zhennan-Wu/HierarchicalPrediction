@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J dbn_gm_new_500
+#SBATCH -J dbn_gm_new_1000
 #SBATCH -p gpu
 #SBATCH -o ../outputs/output_%j.txt
 #SBATCH -e ../outputs/error_%j.err
