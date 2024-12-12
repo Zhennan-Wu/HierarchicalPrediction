@@ -135,7 +135,7 @@ class DBN:
             return dataloader
         else:
             for batch, label in dataloader:
-                p_x_dash, x_dash = self.generate_input_dataset_for_layer(index, batch, label)
+                p_x_dash, x_dash = self.generate_activation_input_for_layer(index, batch, label)
                 if (pretrain):
                     input_layer.append(p_x_dash)
                 else:
@@ -149,7 +149,7 @@ class DBN:
             hidden_loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
             return hidden_loader
 
-    def generate_input_dataset_for_layer(self, index: int, dataset: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
+    def generate_activation_input_for_layer(self, index: int, dataset: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
         """
         Generate input for layer
         """
@@ -199,7 +199,8 @@ class DBN:
                     output_mode = "multinomial"
             else:
                 output_mode = "bernoulli"
-            rbm = RBM(n_components=hn, learning_rate=0.1, batch_size=self.batch_size, n_iter=self.epochs, verbose=0, add_bias=self.bias, target_in_model=target_status, hybrid=False, input_dist=input_mode, latent_dist=output_mode, target_dist='gaussian')
+            rbm_savefig = savefig + "rbm_{}/".format(index)
+            rbm = RBM(n_components=hn, learning_rate=0.1, batch_size=self.batch_size, n_iter=self.epochs, verbose=0, savefile=rbm_savefig, add_bias=self.bias, target_in_model=target_status, hybrid=False, input_dist=input_mode, latent_dist=output_mode, target_dist='gaussian')
 
             hidden_loader = self.generate_input_for_layer(index, dataloader)
 
@@ -214,50 +215,15 @@ class DBN:
             self.top_parameters["tb"] = torch.tensor(rbm.intercept_target_, dtype=torch.float64, device=self.device)
 
             print("Finished Training Layer", index, "to", index+1)
-            # training_loss = self.calc_training_loss(dataloader, index+1)
-            # print("Training Loss of DBN with {} layers:".format(index+1), training_loss)
-            # self.depthwise_training_loss.append(training_loss)
             end_time = time.time()
             print("Time taken for training DBN layer", index, "to", index+1, "is", end_time-start_time, "seconds")
             visualize_rbm(rbm, hidden_loader, index, savefig)
-
-            # encoded = self.encode(dataloader, index+1)
-            # visualize_data(encoded, index+1)
             
         if (self.savefile is not None):
             model = self.initialize_nn_model()
             nn_savefile = self.savefile.replace(".pth", "_nn.pth")
             torch.save(model, nn_savefile)
             self.save_model()
-        
-        self.visualize_training_curve()
-
-    def visualize_training_curve(self):
-        """
-        Visualize training curve
-        """
-        directory = "../results/plots/DBN/"
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-        plt_title = "Training Loss for increasing depth of DBN"
-        x = np.arange(1, len(self.depthwise_training_loss)+1)
-        plt.plot(x, np.array(self.depthwise_training_loss))
-        plt.xlabel("Depth")
-        plt.ylabel("Training Loss")
-        plt.title(plt_title)
-        plt.savefig(directory + plt_title.replace(" ", "_") + ".png")
-        plt.close()
-        
-    def calc_training_loss(self, dataloader: DataLoader, depth: int):
-        '''
-        '''
-        train_loss = torch.tensor([0.], dtype=torch.float64, device=self.device)
-        for batch_data, label in dataloader:
-            v_original = batch_data.to(self.device)
-            label = label.unsqueeze(1).to(torch.float64).to(self.device)
-            v_reconstruct, _ = self.reconstructor(v_original, label, depth)
-            train_loss += torch.mean(torch.abs(v_original - v_reconstruct))
-        return train_loss.item()
 
     def reconstructor(self, x: torch.Tensor, y: torch.Tensor, depth: int = -1) -> torch.Tensor:
         """
@@ -271,33 +237,25 @@ class DBN:
             for i in range(depth):
                 if (i == 0):
                     input_mode = self.mode
-                    p_x = x_dash
                 else:
-                    input_mode = "gaussian"
+                    input_mode = "bernoulli"
                 if (i == len(self.layers)-1 and self.gaussian_top):
                     top_down_sample = True
-                    p_x, x_dash = self.sample_h(i, p_x, y, input_mode, top_down_sample)
+                    p_x, x_dash = self.sample_h(i, x_dash, y, input_mode, top_down_sample)
                 else:
-                    p_x, x_dash = self.sample_h(i, p_x, y, input_mode)
-            x_gen.append(p_x)
+                    p_x, x_dash = self.sample_h(i, x_dash, y, input_mode)
+            x_gen.append(x_dash)
         x_dash = torch.stack(x_gen)
         x_dash = torch.mean(x_dash, dim=0)
 
-
         y_gen = []
         for _ in range(self.k):
-            y_dash = torch.bernoulli(x_dash)
-            p_y = x_dash
+            y_dash = x_dash
             for i in range(depth-1, -1, -1):
-                if (i == 0):
-                    p_y, y_dash = self.sample_v(i, p_y, self.mode)
-                else:
-                    p_y, y_dash = self.sample_v(i, p_y, "gaussian")
-            y_gen.append(p_y)
+                p_y, y_dash = self.sample_v(i, y_dash, "bernoulli")
+            y_gen.append(y_dash)
         y_dash = torch.stack(y_gen)
         y_dash = torch.mean(y_dash, dim=0)
-        y_dash = torch.bernoulli(y_dash)
-
         return y_dash, x_dash
 
     def reconstruct(self, dataloader: DataLoader, depth: int = -1) -> DataLoader:
@@ -320,12 +278,28 @@ class DBN:
         dataset = TensorDataset(visible_data, latent_vars, data_labels)
         return DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
     
+    def calc_reconstruction_error(self, dataloader: DataLoader, depth: int = -1) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Calculate reconstruction error
+        """
+        if (depth == -1):
+            depth = len(self.layers)
+        reconstruction_error = 0.
+        num_batches = 0
+        for batch, label in dataloader:
+            batch = batch.to(self.device)
+            label = label.unsqueeze(1).to(torch.float64).to(self.device)
+            visible, _ = self.reconstructor(batch, label, depth)
+            reconstruction_error += torch.mean((visible-batch)**2)
+            num_batches += 1
+        return reconstruction_error/num_batches
+    
     def encoder(self, dataset: torch.Tensor, label: torch.Tensor, depth: int) -> torch.Tensor:
         """
         Generate top level latent variables
         """
         dataset = dataset.to(self.device)
-        activation, _ = self.generate_input_dataset_for_layer(depth, dataset, label)
+        activation, _ = self.generate_activation_input_for_layer(depth, dataset, label)
         if (depth == len(self.layers) and self.gaussian_top):
             activation = activation + torch.matmul(label/(self.top_sigma**2), self.top_parameters["W"].to(self.device)) + self.top_parameters["tb"].to(self.device)
         if (self.multinomial_top):
@@ -437,7 +411,7 @@ if __name__ == "__main__":
     print('MAE for all 0 selection:', torch.mean(train_x))
     batch_size = 1000	
     prev_cumu_epochs = 0
-    epochs = 500
+    epochs = 5
     datasize = train_x.shape[0]
     data_dimension = train_x.shape[1]
     gaussian_middle = True

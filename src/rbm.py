@@ -17,10 +17,11 @@ from sklearn.utils import check_random_state, gen_even_slices
 from sklearn.utils._param_validation import Interval
 from sklearn.utils.extmath import safe_sparse_dot
 from sklearn.utils.validation import check_is_fitted
+import matplotlib.pyplot as plt
 
 
 class RBM(BernoulliRBM):
-    def __init__(self, n_components=2, learning_rate=0.1, batch_size=10, n_iter=10, verbose=0, random_state=None, add_bias=False, target_in_model=False, hybrid=False, input_dist='bernoulli', latent_dist='bernoulli',target_dist='gaussian'):
+    def __init__(self, n_components=2, learning_rate=0.1, batch_size=10, n_iter=10, verbose=0, savefile="./", random_state=None, add_bias=False, target_in_model=False, hybrid=False, input_dist='bernoulli', latent_dist='bernoulli',target_dist='gaussian'):
         super().__init__(n_components=n_components, learning_rate=learning_rate,
                          batch_size=batch_size, n_iter=n_iter, verbose=verbose, random_state=random_state)
         self.add_bias = add_bias
@@ -29,6 +30,7 @@ class RBM(BernoulliRBM):
         self.target_dist = target_dist # 'bernoulli' or 'gaussian'
         self.target_in_model = target_in_model
         self.hybrid = hybrid
+        self.savefile = savefile
 
     def transform(self, X, y):
         """Compute the hidden layer activation probabilities, P(h=1|v=X).
@@ -212,7 +214,7 @@ class RBM(BernoulliRBM):
         samples = np.clip(samples, lower_bound, upper_bound)
         return samples
     
-    def _free_energy(self, v, t):
+    def _free_energy(self, v, t, h):
         """Computes the free energy F(v) = - log sum_h exp(-E(v,h)).
 
         Parameters
@@ -226,26 +228,26 @@ class RBM(BernoulliRBM):
             The value of the free energy.
         """
         if (self.add_bias and self.input_dist == 'gaussian'):
-            input_energy = np.sum(((v - self.intercept_visible_) / self.sigma) ** 2, axis=1)/2 - np.logaddexp(0, safe_sparse_dot(v/self.sigma, self.components_.T) + self.intercept_hidden_).sum(axis=1)
+            input_energy = np.sum(((v - self.intercept_visible_) / self.sigma) ** 2, axis=1)/2 -np.sum((safe_sparse_dot(v/self.sigma, self.components_.T) + self.intercept_hidden_)*h, axis=1)
         elif (self.add_bias and self.input_dist == 'bernoulli'):
-            input_energy = -safe_sparse_dot(v, self.intercept_visible_) - np.logaddexp(0, safe_sparse_dot(v, self.components_.T) + self.intercept_hidden_).sum(axis=1)
+            input_energy = -safe_sparse_dot(v, self.intercept_visible_) - np.sum((safe_sparse_dot(v, self.components_.T) + self.intercept_hidden_)*h, axis=1)
         elif (self.input_dist == 'gaussian'):
-            input_energy = np.sum((v / self.sigma) ** 2, axis=1)/2 - np.logaddexp(0, safe_sparse_dot(v/self.sigma, self.components_.T)).sum(axis=1)
+            input_energy = np.sum((v / self.sigma) ** 2, axis=1)/2 - np.sum((safe_sparse_dot(v/self.sigma, self.components_.T))*h, axis=1)
         elif (self.input_dist == 'bernoulli'):
-            input_energy = - np.logaddexp(0, safe_sparse_dot(v, self.components_.T)).sum(axis=1)
+            input_energy = - np.sum(safe_sparse_dot(v, self.components_.T)*h, axis=1)
         else:
             raise ValueError("Invalid input distribution: {}".format(self.input_dist))
         
         if (self.target_in_model):
             if (self.add_bias and self.target_dist == 'gaussian'):
-                target_energy = np.sum(((t - self.intercept_target_) / self.target_sigma) ** 2, axis=1)/2 - np.logaddexp(0, safe_sparse_dot(t/self.target_sigma, self.target_components_) + self.intercept_hidden_).sum(axis=1)
+                target_energy = np.sum(((t - self.intercept_target_) / self.target_sigma) ** 2, axis=1)/2 - np.sum((safe_sparse_dot(t/self.target_sigma, self.target_components_) + self.intercept_hidden_)*h, axis=1)
             elif (self.target_dist == 'gaussian'):
-                target_energy = np.sum((t / self.target_sigma) ** 2, axis=1)/2 - np.logaddexp(0, safe_sparse_dot(t/self.target_sigma, self.target_components_)).sum(axis=1)
+                target_energy = np.sum((t / self.target_sigma) ** 2, axis=1)/2 - np.sum(safe_sparse_dot(t/self.target_sigma, self.target_components_)*h, axis=1)
             else:
                 raise ValueError("Invalid target distribution: {}".format(self.target_dist))
         else:
-            target_energy = 0.
-        return input_energy + target_energy
+            target_energy = np.zeros(v.shape[0], dtype=np.float64)
+        return np.sum(input_energy + target_energy)
 
     def gibbs(self, v, t):
         """Perform one Gibbs sampling step.
@@ -366,7 +368,7 @@ class RBM(BernoulliRBM):
         else:
             raise ValueError("Invalid latent distribution: {}".format(self.latent_dist))
 
-    def score_samples(self, X, y):
+    def estimate_energy(self, X, y, repeat=10):
         """Compute the pseudo-likelihood of X.
 
         Parameters
@@ -387,26 +389,14 @@ class RBM(BernoulliRBM):
         """
         check_is_fitted(self)
 
-        v = self._validate_data(X, accept_sparse="csr", reset=False)
-        t = self._validate_data(y, accept_sparse="csr", reset=False)
-        rng = check_random_state(self.random_state)
+        X = self._validate_data(X, accept_sparse="csr", reset=False)
+        y = self._validate_data(y, accept_sparse="csr", reset=False)
+        energy = 0
+        for _ in range(repeat):
+            h = self._sample_hiddens(X, y, self.random_state_)
+            energy += self._free_energy(X, y, h)
+        return energy / repeat
 
-        # Randomly corrupt one feature in each sample in v.
-        ind = (np.arange(v.shape[0]), rng.randint(0, v.shape[1], v.shape[0]))
-        if sp.issparse(v):
-            data = -2 * v[ind] + 1
-            if isinstance(data, np.matrix):  # v is a sparse matrix
-                v_ = v + sp.csr_matrix((data.A.ravel(), ind), shape=v.shape)
-            else:  # v is a sparse array
-                v_ = v + sp.csr_array((data.ravel(), ind), shape=v.shape)
-        else:
-            v_ = v.copy()
-            v_[ind] = 1 - v_[ind]
-
-        fe = self._free_energy(v, t)
-        fe_ = self._free_energy(v_, t)
-        # log(expit(x)) = log(1 / (1 + exp(-x)) = -np.logaddexp(0, -x)
-        return -v.shape[1] * np.logaddexp(0, -(fe_ - fe))
 
     @_fit_context(prefer_skip_nested_validation=True)
     def fit(self, X, y, sample_size=100, sigma = 0.1, target_sigma = 0.1, hybrid_alpha=1.):
@@ -454,24 +444,21 @@ class RBM(BernoulliRBM):
         batch_slices = list(
             gen_even_slices(n_batches * self.batch_size, n_batches, n_samples=n_samples)
         )
-        verbose = self.verbose
-        begin = time.time()
-        for iteration in range(1, self.n_iter + 1):
+        energy_tracking = []
+        for _ in range(1, self.n_iter + 1):
+            energy = 0
+            batch_count = 0
             for batch_slice in batch_slices:
                 self._fit(X[batch_slice], y[batch_slice], rng)
-
-            if verbose:
-                end = time.time()
-                print(
-                    "[%s] Iteration %d, pseudo-likelihood = %.2f, time = %.2fs"
-                    % (
-                        type(self).__name__,
-                        iteration,
-                        self.score_samples(X).mean(),
-                        end - begin,
-                    )
-                )
-                begin = end
+                energy += self.estimate_energy(X[batch_slice], y[batch_slice])
+                batch_count += 1
+            energy_tracking.append(energy/batch_count)
+        
+        plt.plot(energy_tracking)
+        plt.xlabel("Iteration")
+        plt.ylabel("Energy")
+        plt.title("Energy vs Iteration")
+        plt.savefig(self.savefile + "energy.png")
 
         return self
 
@@ -516,25 +503,22 @@ class RBM(BernoulliRBM):
             self.intercept_visible_ = np.zeros(v_dim, dtype=np.float64)
         self.h_samples_ = np.zeros((dataloader.batch_size, self.n_components), dtype=np.float64)
 
-        verbose = self.verbose
-        begin = time.time()
-        for iteration in range(1, self.n_iter + 1):
+        energy_tracking = []
+        for _ in range(1, self.n_iter + 1):
+            energy = 0
+            batch_count = 0
             for X, y in dataloader:
                 X = X.detach().cpu().numpy()
                 y = y.detach().cpu().numpy().reshape(-1, t_dim)
                 self._fit(X, y, rng)
-
-            if verbose:
-                end = time.time()
-                print(
-                    "[%s] Iteration %d, pseudo-likelihood = %.2f, time = %.2fs"
-                    % (
-                        type(self).__name__,
-                        iteration,
-                        self.score_samples(X).mean(),
-                        end - begin,
-                    )
-                )
-                begin = end
+                energy += self.estimate_energy(X, y)
+                batch_count += 1
+            energy_tracking.append(energy/batch_count)
+        
+        plt.plot(energy_tracking)
+        plt.xlabel("Iteration")
+        plt.ylabel("Energy")
+        plt.title("Energy vs Iteration")
+        plt.savefig(self.savefile + "energy.png")
 
         return self

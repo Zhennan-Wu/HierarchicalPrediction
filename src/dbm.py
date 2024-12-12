@@ -42,9 +42,12 @@ class DBM(DBN):
             x_top = torch.zeros((1, W_top.size(0)), dtype = torch.float64, device=self.device)
 
         if (layer_index == 0):
-            activation = torch.matmul(x_bottom/(self.sigma**2), W_bottom.t()) + torch.matmul(x_top, W_top) + bias
+            if (self.mode == "gaussian"):
+                activation = torch.matmul(x_bottom/self.sigma, W_bottom.t()) + torch.matmul(x_top, W_top) + bias
+            else:
+                activation = torch.matmul(x_bottom, W_bottom.t()) + torch.matmul(x_top, W_top) + bias
         elif (layer_index == len(self.layers)-1):
-            activation = torch.matmul(x_bottom, W_bottom.t()) + torch.matmul(x_top/(self.top_sigma**2), W_top) + bias
+            activation = torch.matmul(x_bottom, W_bottom.t()) + torch.matmul(x_top/self.top_sigma, W_top) + bias
         else:
             activation = torch.matmul(x_bottom, W_bottom.t()) + torch.matmul(x_top, W_top) + bias
 
@@ -68,13 +71,10 @@ class DBM(DBN):
             return dataset
         else:
             x_gen = []
-            for _ in range(self.k):
-                x_dash = dataset.to(self.device)
-                for i in range(index):
-                    _, x_dash = self.two_way_sample_h(i, x_dash)
+            x_dash = dataset.to(self.device)
+            for i in range(index):
+                _, x_dash = self.two_way_sample_h(i, x_dash)
                 x_gen.append(x_dash)
-            x_dash = torch.stack(x_gen)
-            x_dash = torch.mean(x_dash, dim=0)
             return x_dash
 
     def gibbs_update_dataloader(self, dataloader: DataLoader, gibbs_iterations, discriminator: bool = False) -> DataLoader:
@@ -121,7 +121,7 @@ class DBM(DBN):
             new_variables = []
             for index in range(len(self.layers)+2):
                 if (index == 0):
-                    _, var = self.sample_v(index, variables[index+1], label)
+                    _, var = self.sample_v(index, variables[index+1])
                     new_variables.append(var)
                 elif (index == len(self.layers)+1):
                     _, var = self.sample_r(variables[-1])
