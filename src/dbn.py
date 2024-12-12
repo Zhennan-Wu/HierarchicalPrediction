@@ -49,24 +49,29 @@ class DBN:
         self.top_parameters = {"W":None, "tb":None}
         self.disc_alpha = disc_alpha
 
-    def sample_v(self, layer_index: int, y: torch.Tensor) -> torch.Tensor:
+    def sample_v(self, layer_index: int, y: torch.Tensor, input_mode: str="bernoulli") -> torch.Tensor:
         """
         Sample visible units given hidden units
         """
         W = self.layer_parameters[layer_index]["W"]
         if (layer_index == 0):
             vb = self.visible_bias
+            sigma = self.sigma
         else:
             vb = self.layer_parameters[layer_index-1]["hb"]
-        activation = torch.matmul(y, W) + vb
+            sigma = torch.ones((1,), dtype=torch.float64, device=self.device)/10.
 
-        if (self.mode == "bernoulli"):
+        if (input_mode == "gaussian"):
+            activation = torch.matmul(y, W)*sigma + vb
+        else:
+            activation = torch.matmul(y, W) + vb
+
+        if (input_mode == "bernoulli"):
             p_v_given_h = torch.sigmoid(activation)
             variable = torch.bernoulli(p_v_given_h)
-        elif (self.mode == "gaussian"):
-            gaussian_dist = torch.distributions.normal.Normal(activation, self.sigma)
+        elif (input_mode == "gaussian"):
+            gaussian_dist = torch.distributions.normal.Normal(activation, sigma)
             variable = gaussian_dist.sample()
-            # Do not need p_v_given_h, otherwise it will not be correct
             # p_v_given_h = torch.exp(gaussian_dist.log_prob(variable))
             p_v_given_h = None
         else:
@@ -81,20 +86,20 @@ class DBN:
         bias = self.layer_parameters[layer_index]["hb"]
         if (layer_index == 0):
             if (input_mode == "gaussian"):
-                activation = torch.matmul(x_bottom/(self.sigma**2), W_bottom.t()) + bias
+                activation = torch.matmul(x_bottom/self.sigma, W_bottom.t()) + bias
             else:
                 activation = torch.matmul(x_bottom, W_bottom.t()) + bias
         else:    
             logistic_sigma = torch.ones((1,), dtype=torch.float64, device=self.device)/10.
             if (input_mode == "gaussian"):
-                activation = torch.matmul(x_bottom/(logistic_sigma**2), W_bottom.t()) + bias
+                activation = torch.matmul(x_bottom/logistic_sigma, W_bottom.t()) + bias
             else:
                 activation = torch.matmul(x_bottom, W_bottom.t()) + bias
 
         if (layer_index == len(self.layers)-1 and self.multinomial_top):
             if (top_down_sample):
                 if (self.gaussian_top):
-                    activation = activation + torch.matmul(label/(self.top_sigma**2), self.top_parameters["W"])
+                    activation = activation + torch.matmul(label/self.top_sigma, self.top_parameters["W"])
             p_h_given_v = torch.softmax(activation, dim=1)
             indices = torch.multinomial(p_h_given_v, self.multinomial_sample_size, replacement=True)
             one_hot = torch.zeros(p_h_given_v.size(0), self.multinomial_sample_size, p_h_given_v.size(1), device=self.device).scatter_(2, indices.unsqueeze(-1), 1)
@@ -109,7 +114,7 @@ class DBN:
         Sample reconstruction
         """
         if (self.gaussian_top):
-            mean = torch.mm(x_bottom/(self.top_sigma**2), self.top_parameters["W"].t()) + self.top_parameters["tb"]
+            mean = torch.mm(x_bottom, self.top_parameters["W"].t())*self.top_sigma + self.top_parameters["tb"]
             gaussian_dist = torch.distributions.normal.Normal(mean, self.top_sigma)
             variable = gaussian_dist.sample()
             # p_r_given_h = torch.exp(gaussian_dist.log_prob(variable))
@@ -266,13 +271,14 @@ class DBN:
             for i in range(depth):
                 if (i == 0):
                     input_mode = self.mode
+                    p_x = x_dash
                 else:
-                    input_mode = "bernoulli"
+                    input_mode = "gaussian"
                 if (i == len(self.layers)-1 and self.gaussian_top):
                     top_down_sample = True
-                    p_x, x_dash = self.sample_h(i, x_dash, y, input_mode, top_down_sample)
+                    p_x, x_dash = self.sample_h(i, p_x, y, input_mode, top_down_sample)
                 else:
-                    p_x, x_dash = self.sample_h(i, x_dash, y, input_mode)
+                    p_x, x_dash = self.sample_h(i, p_x, y, input_mode)
             x_gen.append(p_x)
         x_dash = torch.stack(x_gen)
         x_dash = torch.mean(x_dash, dim=0)
@@ -281,8 +287,12 @@ class DBN:
         y_gen = []
         for _ in range(self.k):
             y_dash = torch.bernoulli(x_dash)
+            p_y = x_dash
             for i in range(depth-1, -1, -1):
-                p_y, y_dash = self.sample_v(i, y_dash)
+                if (i == 0):
+                    p_y, y_dash = self.sample_v(i, p_y, self.mode)
+                else:
+                    p_y, y_dash = self.sample_v(i, p_y, "gaussian")
             y_gen.append(p_y)
         y_dash = torch.stack(y_gen)
         y_dash = torch.mean(y_dash, dim=0)
@@ -315,10 +325,7 @@ class DBN:
         Generate top level latent variables
         """
         dataset = dataset.to(self.device)
-        _, x_bottom = self.generate_input_dataset_for_layer(depth-1, dataset, label)
-        W_bottom = self.layer_parameters[depth-1]["W"].to(self.device)
-        b_bottom = self.layer_parameters[depth-1]["hb"].to(self.device)
-        activation = torch.matmul(x_bottom, W_bottom.t()) + b_bottom 
+        activation, _ = self.generate_input_dataset_for_layer(depth, dataset, label)
         if (depth == len(self.layers) and self.gaussian_top):
             activation = activation + torch.matmul(label/(self.top_sigma**2), self.top_parameters["W"].to(self.device)) + self.top_parameters["tb"].to(self.device)
         if (self.multinomial_top):
@@ -429,7 +436,7 @@ if __name__ == "__main__":
     train_y = train_y/10.
     print('MAE for all 0 selection:', torch.mean(train_x))
     batch_size = 1000	
-    prev_cumu_epochs = 500
+    prev_cumu_epochs = 0
     epochs = 500
     datasize = train_x.shape[0]
     data_dimension = train_x.shape[1]
@@ -441,10 +448,10 @@ if __name__ == "__main__":
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
     for experiment in ["multinomial_label", "bernoulli_label", "multinomial", "bernoulli"]:
-        directory = "../results/plots/DBN_GM_new/epoch_{}/".format(epochs + prev_cumu_epochs)
+        directory = "../results/plots/DBN_GM_new2/epoch_{}/".format(epochs + prev_cumu_epochs)
         experi_type = experiment
         directory = directory + "UMAP_" + experi_type + "/"
-        filename = "dbn_gm_new_" + experi_type + ".pth"
+        filename = "dbn_gm_new2_" + experi_type + ".pth"
         if not os.path.exists(directory):
             os.makedirs(directory)
 
@@ -458,7 +465,7 @@ if __name__ == "__main__":
             dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = True, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1., gaussian_middle = gaussian_middle)
         else:
             raise ValueError("Invalid Experiment Type")
-        dbn.load_model(filename)
+        # dbn.load_model(filename)
         dbn.train(data_loader, directory)
 
         from sklearn.cluster import KMeans
