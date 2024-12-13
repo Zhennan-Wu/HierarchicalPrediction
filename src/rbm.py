@@ -251,7 +251,7 @@ class RBM(BernoulliRBM):
                 raise ValueError("Invalid target distribution: {}".format(self.target_dist))
         else:
             target_energy = np.zeros(v.shape[0], dtype=np.float64)
-        return np.sum(input_energy + target_energy)
+        return np.mean(input_energy + target_energy)
 
     def gibbs(self, v, t):
         """Perform one Gibbs sampling step.
