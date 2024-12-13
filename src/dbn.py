@@ -231,6 +231,57 @@ class DBN:
             torch.save(model, nn_savefile)
             self.save_model()
 
+    def _multilayer_free_energy(self, x: torch.Tensor, y: torch.Tensor, depth: int = -1) -> torch.Tensor:
+        """
+        Calculate free energy
+        """
+        if (depth == -1):
+            depth = len(self.layers)
+        energy = torch.zeros(x.size(0), dtype=torch.float64, device=self.device)
+        for i in range(depth):
+            if (i == 0):
+                input_mode = self.mode
+                if (self.mode == "gaussian"):
+                    energy = energy + torch.sum(((x_dash - self.visible_bias)/self.sigma)**2, axis=1)/2.
+                else:
+                    energy = energy - torch.sum(x_dash*self.visible_bias, axis=1)
+            else:
+                input_mode = "bernoulli"
+            prev_x = x_dash.clone()
+            if (i == len(self.layers)-1 and self.gaussian_top):
+                top_down_sample = True
+                p_x, x_dash = self.sample_h(i, x_dash, y, input_mode, top_down_sample)
+                energy = energy + torch.sum(((x_dash - self.top_parameters["Tb"])/self.top_sigma)**2, axis=1)/2 - torch.sum(torch.matmul(x_dash, self.top_parameters["TW"].t())*y/self.top_sigma, axis=1)
+            else:
+                p_x, x_dash = self.sample_h(i, x_dash, y, input_mode)
+            energy = energy - torch.sum(torch.matmul(prev_x, self.layer_parameters[i]["W"].t())*x_dash, axis=1) - torch.sum(x_dash*self.layer_parameters[i]["hb"], axis=1)
+        return torch.mean(energy)
+    
+    def estimate_multilayer_energy(self, x: torch.Tensor, y: torch.Tensor, depth: int = -1) -> torch.Tensor:
+        """
+        Estimate energy
+        """
+        if (depth == -1):
+            depth = len(self.layers)
+        energy = []
+        for _ in self.k:
+            energy.append(self._multilayer_free_energy(x, y, depth))
+        energy = torch.stack(energy)
+        return torch.mean(energy)
+    
+    def estimate_multilayer_energy_from_loader(self, dataloader: DataLoader, depth: int = -1) -> torch.Tensor:
+        """
+        Estimate energy
+        """
+        if (depth == -1):
+            depth = len(self.layers)
+        energy = []
+        for batch, label in dataloader:
+            batch = batch.to(self.device)
+            label = label.unsqueeze(1).to(torch.float64).to(self.device)
+            energy.append(self.estimate_multilayer_energy(batch, label, depth))
+        return energy
+
     def reconstructor(self, x: torch.Tensor, y: torch.Tensor, depth: int = -1) -> torch.Tensor:
         """
         Reconstruct input
@@ -290,15 +341,13 @@ class DBN:
         """
         if (depth == -1):
             depth = len(self.layers)
-        reconstruction_error = 0.
-        num_batches = 0
+        reconstruction_error = []
         for batch, label in dataloader:
             batch = batch.to(self.device)
             label = label.unsqueeze(1).to(torch.float64).to(self.device)
             visible, _ = self.reconstructor(batch, label, depth)
-            reconstruction_error += torch.mean((visible-batch)**2)
-            num_batches += 1
-        return reconstruction_error/num_batches
+            reconstruction_error.append(torch.mean((visible-batch)**2))
+        return reconstruction_error
     
     def encoder(self, dataset: torch.Tensor, label: torch.Tensor, depth: int) -> torch.Tensor:
         """
