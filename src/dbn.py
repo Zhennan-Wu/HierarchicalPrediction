@@ -27,7 +27,7 @@ class DBN:
         self.layers = layers
         self.bias = bias
         self.batch_size = batch_size
-        self.layer_parameters = [{"W":None, "hb":None} for _ in range(len(layers))]
+        self.layer_parameters = [{"W":None, "hb":None, "tW":None, "tb":None} for _ in range(len(layers))]
         self.visible_bias = None
         self.k = k
         self.mode = mode
@@ -46,7 +46,7 @@ class DBN:
         self.multinomial_top = multinomial_top
         self.multinomial_sample_size = multinomial_sample_size
         self.depthwise_training_loss = []
-        self.top_parameters = {"W":None, "tb":None}
+        self.top_parameters = {"TW":None, "Tb":None}
         self.disc_alpha = disc_alpha
 
     def sample_v(self, layer_index: int, y: torch.Tensor, input_mode: str="bernoulli") -> torch.Tensor:
@@ -99,7 +99,7 @@ class DBN:
         if (layer_index == len(self.layers)-1 and self.multinomial_top):
             if (top_down_sample):
                 if (self.gaussian_top):
-                    activation = activation + torch.matmul(label/self.top_sigma, self.top_parameters["W"])
+                    activation = activation + torch.matmul(label/self.top_sigma, self.top_parameters["TW"])
             p_h_given_v = torch.softmax(activation, dim=1)
             indices = torch.multinomial(p_h_given_v, self.multinomial_sample_size, replacement=True)
             one_hot = torch.zeros(p_h_given_v.size(0), self.multinomial_sample_size, p_h_given_v.size(1), device=self.device).scatter_(2, indices.unsqueeze(-1), 1)
@@ -114,7 +114,7 @@ class DBN:
         Sample reconstruction
         """
         if (self.gaussian_top):
-            mean = torch.mm(x_bottom, self.top_parameters["W"].t())*self.top_sigma + self.top_parameters["tb"]
+            mean = torch.mm(x_bottom, self.top_parameters["TW"].t())*self.top_sigma + self.top_parameters["Tb"]
             gaussian_dist = torch.distributions.normal.Normal(mean, self.top_sigma)
             variable = gaussian_dist.sample()
             # p_r_given_h = torch.exp(gaussian_dist.log_prob(variable))
@@ -204,15 +204,21 @@ class DBN:
 
             hidden_loader = self.generate_input_for_layer(index, dataloader)
 
-            rbm.fit_dataloader(hidden_loader, vn, 1, self.multinomial_sample_size, torch.mean(self.sigma).item(), torch.mean(self.top_sigma).item(), self.disc_alpha)
+            if (index == 0):
+                visible_bias = self.visible_bias
+            else:
+                visible_bias = self.layer_parameters[index-1]["hb"]
+            rbm.fit_dataloader(hidden_loader, vn, 1, components=self.layer_parameters[index]["W"], target_components=self.layer_parameters[index]["tW"], visible_bias=visible_bias, hidden_bias=self.layer_parameters[index]["hb"], target_bias=self.layer_parameters[index]["tb"], sample_size=self.multinomial_sample_size, sigma=torch.mean(self.sigma).item(), target_sigma=torch.mean(self.top_sigma).item(), hybrid_alpha=self.disc_alpha)
             self.layer_parameters[index]["W"] = torch.tensor(rbm.components_, dtype=torch.float64, device=self.device)
             self.layer_parameters[index]["hb"] = torch.tensor(rbm.intercept_hidden_, dtype=torch.float64, device=self.device)
+            self.layer_parameters[index]["tW"] = torch.tensor(rbm.target_components_, dtype=torch.float64, device=self.device)
+            self.layer_parameters[index]["tb"] = torch.tensor(rbm.intercept_target_, dtype=torch.float64, device=self.device)
             if (index == 0):
                 self.visible_bias = torch.tensor(rbm.intercept_visible_, dtype=torch.float64, device=self.device)
             else:
                 self.layer_parameters[index-1]["hb"] = torch.tensor(rbm.intercept_visible_, dtype=torch.float64, device=self.device)
-            self.top_parameters["W"] = torch.tensor(rbm.target_components_, dtype=torch.float64, device=self.device)
-            self.top_parameters["tb"] = torch.tensor(rbm.intercept_target_, dtype=torch.float64, device=self.device)
+            self.top_parameters["TW"] = torch.tensor(rbm.target_components_, dtype=torch.float64, device=self.device)
+            self.top_parameters["Tb"] = torch.tensor(rbm.intercept_target_, dtype=torch.float64, device=self.device)
 
             print("Finished Training Layer", index, "to", index+1)
             end_time = time.time()
@@ -301,7 +307,7 @@ class DBN:
         dataset = dataset.to(self.device)
         activation, _ = self.generate_activation_input_for_layer(depth, dataset, label)
         if (depth == len(self.layers) and self.gaussian_top):
-            activation = activation + torch.matmul(label/(self.top_sigma**2), self.top_parameters["W"].to(self.device)) + self.top_parameters["tb"].to(self.device)
+            activation = activation + torch.matmul(label/(self.top_sigma**2), self.top_parameters["TW"].to(self.device)) + self.top_parameters["Tb"].to(self.device)
         if (self.multinomial_top):
             p_h_given_v = torch.softmax(activation, dim=1)      
         else:
@@ -334,10 +340,10 @@ class DBN:
         model = torch.load(savefile, weights_only=False)
         layer_parameters = []
         for index in range(len(model["W"])):
-            layer_parameters.append({"W":model["W"][index].to(self.device), "hb":model["hb"][index].to(self.device)})
+            layer_parameters.append({"W":model["W"][index].to(self.device), "hb":model["hb"][index].to(self.device), "tW":model["tW"][index].to(self.device), "tb":model["tb"[index]].to(self.device)})
             visible_bias = model["vb"]
         
-        top_parameters = {"W":model["TW"].to(self.device), "tb":model["tb"].to(self.device)}
+        top_parameters = {"TW":model["TW"].to(self.device), "Tb":model["Tb"].to(self.device)}
         self.layer_parameters = layer_parameters
         self.top_parameters = top_parameters
         self.visible_bias = visible_bias
@@ -368,12 +374,14 @@ class DBN:
         """
         if (savefile is None):
             savefile = self.savefile
-        model = {"W": [], "vb": None, "hb": [], "TW": None , "tb": None}
+        model = {"W": [], "vb": None, "hb": [], "tW":[], "tb":[],"TW": None , "Tb": None}
         for layer in self.layer_parameters:
             model["W"].append(layer["W"])
             model["hb"].append(layer["hb"])
-        model["TW"] = self.top_parameters["W"]
-        model["tb"] = self.top_parameters["tb"]
+            model["tW"].append(layer["tW"])
+            model["tb"].append(layer["tb"])
+        model["TW"] = self.top_parameters["TW"]
+        model["Tb"] = self.top_parameters["Tb"]
         model["vb"] = self.visible_bias
         torch.save(model, savefile)
 
@@ -411,7 +419,7 @@ if __name__ == "__main__":
     print('MAE for all 0 selection:', torch.mean(train_x))
     batch_size = 1000	
     prev_cumu_epochs = 0
-    epochs = 5
+    epochs = 1000
     datasize = train_x.shape[0]
     data_dimension = train_x.shape[1]
     gaussian_middle = True
@@ -421,11 +429,11 @@ if __name__ == "__main__":
     dataset = TensorDataset(train_x, train_y)
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-    for experiment in ["multinomial_label", "bernoulli_label", "multinomial", "bernoulli"]:
-        directory = "../results/plots/DBN_GM_new2/epoch_{}/".format(epochs + prev_cumu_epochs)
+    for experiment in ["bernoulli", "multinomial", "bernoulli_label", "multinomial_label"]:
+        directory = "../results/plots/DBN_GM_new3/epoch_{}/".format(epochs + prev_cumu_epochs)
         experi_type = experiment
         directory = directory + "UMAP_" + experi_type + "/"
-        filename = "dbn_gm_new2_" + experi_type + ".pth"
+        filename = "dbn_gm_new3_" + experi_type + ".pth"
         if not os.path.exists(directory):
             os.makedirs(directory)
 

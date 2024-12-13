@@ -18,6 +18,7 @@ from sklearn.utils._param_validation import Interval
 from sklearn.utils.extmath import safe_sparse_dot
 from sklearn.utils.validation import check_is_fitted
 import matplotlib.pyplot as plt
+import os
 
 
 class RBM(BernoulliRBM):
@@ -30,6 +31,9 @@ class RBM(BernoulliRBM):
         self.target_dist = target_dist # 'bernoulli' or 'gaussian'
         self.target_in_model = target_in_model
         self.hybrid = hybrid
+        
+        if (not os.path.exists(savefile)):
+            os.makedirs(savefile)
         self.savefile = savefile
 
     def transform(self, X, y):
@@ -368,7 +372,7 @@ class RBM(BernoulliRBM):
         else:
             raise ValueError("Invalid latent distribution: {}".format(self.latent_dist))
 
-    def estimate_energy(self, X, y, repeat=10):
+    def estimate_energy(self, X, y, rng, repeat=10):
         """Compute the pseudo-likelihood of X.
 
         Parameters
@@ -393,7 +397,7 @@ class RBM(BernoulliRBM):
         y = self._validate_data(y, accept_sparse="csr", reset=False)
         energy = 0
         for _ in range(repeat):
-            h = self._sample_hiddens(X, y, self.random_state_)
+            h = self._sample_hiddens(X, y, rng)
             energy += self._free_energy(X, y, h)
         return energy / repeat
 
@@ -444,25 +448,34 @@ class RBM(BernoulliRBM):
         batch_slices = list(
             gen_even_slices(n_batches * self.batch_size, n_batches, n_samples=n_samples)
         )
-        energy_tracking = []
+        energy_mean_tracking = []
+        energy_var_tracking = []
         for _ in range(1, self.n_iter + 1):
-            energy = 0
-            batch_count = 0
+            energy = []
             for batch_slice in batch_slices:
                 self._fit(X[batch_slice], y[batch_slice], rng)
-                energy += self.estimate_energy(X[batch_slice], y[batch_slice])
-                batch_count += 1
-            energy_tracking.append(energy/batch_count)
+                energy.append(self.estimate_energy(X, y, rng))
+            energy_mean_tracking.append(np.mean(np.array(energy)))
+            energy_var_tracking.append(np.var(np.array(energy)))
         
-        plt.plot(energy_tracking)
+        x = np.array(list(range(1, len(energy_mean_tracking) + 1)))
+        y = np.array(energy_mean_tracking)
+        y_upper = y + np.array(energy_var_tracking)
+        y_lower =y - np.array(energy_var_tracking)
+        print(y)
+        print(energy_var_tracking)
+        plt.plot(x, y, label="Mean Line")
+        plt.fill_between(x, y_lower, y_upper, alpha=0.2, label="Variance Range")
         plt.xlabel("Iteration")
         plt.ylabel("Energy")
         plt.title("Energy vs Iteration")
+        plt.legend()
         plt.savefig(self.savefile + "energy.png")
+        plt.close()
 
         return self
 
-    def fit_dataloader(self, dataloader, v_dim, t_dim, visible_bias=None, sample_size=100, sigma=0.1, target_sigma=0.1, hybrid_alpha=1.):
+    def fit_dataloader(self, dataloader, v_dim, t_dim, components=None, target_components=None, visible_bias=None, hidden_bias=None, target_bias=None, sample_size=100, sigma=0.1, target_sigma=0.1, hybrid_alpha=1.):
         """Fit the model to the data X.
 
         Parameters
@@ -481,44 +494,64 @@ class RBM(BernoulliRBM):
 
         self.sample_size = sample_size
         self.hybrid_alpha = hybrid_alpha
-        self.components_ = np.asarray(
-            rng.normal(0, 0.01, (self.n_components, v_dim)),
-            order="F",
-            dtype=np.float64,
-        )
+        if (components is not None):
+            self.components_ = components.cpu().numpy()
+        else:
+            self.components_ = np.asarray(
+                rng.normal(0, 0.01, (self.n_components, v_dim)),
+                order="F",
+                dtype=np.float64,
+            )
         self.sigma = sigma
         self.target_sigma = target_sigma
-        self.target_components_ = np.asarray(
-            rng.normal(0, 0.01, (t_dim, self.n_components)),
-            order="F",
-            dtype=np.float64,
-        )
-            
-        self.intercept_target_ = np.zeros(t_dim, dtype=np.float64)
+        if (target_components is not None):
+            self.target_components_ = target_components.cpu().numpy()
+        else:
+            self.target_components_ = np.asarray(
+                rng.normal(0, 0.01, (t_dim, self.n_components)),
+                order="F",
+                dtype=np.float64,
+            )
+        if (target_bias is not None):
+            self.intercept_target_ = target_bias.cpu().numpy()
+        else:
+            self.intercept_target_ = np.zeros(t_dim, dtype=np.float64)
         self._n_features_out = self.components_.shape[0]
-        self.intercept_hidden_ = np.zeros(self.n_components, dtype=np.float64)
+        if (hidden_bias is not None):
+            self.intercept_hidden_ = hidden_bias.cpu().numpy()
+        else:
+            self.intercept_hidden_ = np.zeros(self.n_components, dtype=np.float64)
         if (visible_bias is not None):
-            self.intercept_visible_ = visible_bias
+            self.intercept_visible_ = visible_bias.cpu().numpy()
         else:
             self.intercept_visible_ = np.zeros(v_dim, dtype=np.float64)
         self.h_samples_ = np.zeros((dataloader.batch_size, self.n_components), dtype=np.float64)
 
-        energy_tracking = []
+        energy_mean_tracking = []
+        energy_var_tracking = []
         for _ in range(1, self.n_iter + 1):
-            energy = 0
-            batch_count = 0
+            energy = []
             for X, y in dataloader:
                 X = X.detach().cpu().numpy()
                 y = y.detach().cpu().numpy().reshape(-1, t_dim)
                 self._fit(X, y, rng)
-                energy += self.estimate_energy(X, y)
-                batch_count += 1
-            energy_tracking.append(energy/batch_count)
+                energy.append(self.estimate_energy(X, y, rng))
+            energy_mean_tracking.append(np.mean(np.array(energy)))
+            energy_var_tracking.append(np.var(np.array(energy)))
         
-        plt.plot(energy_tracking)
+        x = np.array(list(range(1, len(energy_mean_tracking) + 1)))
+        y = np.array(energy_mean_tracking)
+        y_upper = y + np.array(energy_var_tracking)
+        y_lower =y - np.array(energy_var_tracking)
+        # print(y)
+        # print(energy_var_tracking)
+        plt.plot(x, y, label="Mean Line")
+        plt.fill_between(x, y_lower, y_upper, alpha=0.2, label="Variance Range")
         plt.xlabel("Iteration")
         plt.ylabel("Energy")
         plt.title("Energy vs Iteration")
+        plt.legend()
         plt.savefig(self.savefile + "energy.png")
+        plt.close()
 
         return self
