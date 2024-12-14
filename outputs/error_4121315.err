@@ -1,0 +1,5 @@
+miniconda version 24.1.2 python3.11.7 unloaded.
+miniconda version 24.1.2 python3.11.7 loaded.
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+slurmstepd: error: *** STEP 4121315.0 ON nid0696 CANCELLED AT 2024-12-14T08:26:24 DUE TO TIME LIMIT ***
+slurmstepd: error: *** JOB 4121315 ON nid0696 CANCELLED AT 2024-12-14T08:26:24 DUE TO TIME LIMIT ***

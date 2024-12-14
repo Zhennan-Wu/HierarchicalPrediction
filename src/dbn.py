@@ -457,8 +457,8 @@ class DBN:
 
 
 if __name__ == "__main__":
-    import warnings
-    warnings.simplefilter("error", RuntimeWarning)
+    # import warnings
+    # warnings.simplefilter("error", RuntimeWarning)
 
     # Run your code here
 
