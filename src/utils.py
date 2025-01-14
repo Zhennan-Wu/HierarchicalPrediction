@@ -134,7 +134,7 @@ def print_tree(d, file:str=None, indent:int =0, opened:bool = False):
                 print('    ' * (indent + 1) + str(value))
 
 
-def visualize_rbm(rbm, hidden_loader, level, savefig):
+def visualize_rbm(rbm, hidden_loader, level, savefig, showplot=False):
     X_train_bin, y_train = hidden_loader.dataset.tensors
     X_train_bin = X_train_bin.detach().cpu().numpy()
     y_train = y_train.detach().cpu().numpy()
@@ -153,11 +153,19 @@ def visualize_rbm(rbm, hidden_loader, level, savefig):
     plt.ylabel("UMAP Dimension 2")
     # plt.show()
     filename = savefig + "level_" + str(level) + ".png"
-    plt.savefig(filename)
+    if (showplot):
+        # Add a caption
+        plt.figtext(0.5, 0.02, filename, ha='center', fontsize=10, color='gray')
+
+        # Show the plot
+        plt.tight_layout()
+        plt.show()
+    else:
+        plt.savefig(filename)
     plt.close()
 
 
-def visualize_data(hidden_loader, level, savefig):
+def visualize_data(hidden_loader, level, savefig, showplot=False):
     X_train_bin, y_train = hidden_loader.dataset.tensors
     X_train_embedded = X_train_bin.detach().cpu().numpy()
     y_train = y_train.detach().cpu().numpy()
@@ -174,7 +182,14 @@ def visualize_data(hidden_loader, level, savefig):
     plt.title("UMAP RBM Encoding of MNIST Training Data of level {}".format(level))
     plt.xlabel("UMAP Dimension 1")
     plt.ylabel("UMAP Dimension 2")
-    plt.savefig(savefig)
+    if (showplot):
+        # Add a caption
+        plt.figtext(0.5, 0.02, savefig, ha='center', fontsize=10, color='gray')
+        # Show the plot
+        plt.tight_layout()
+        plt.show()
+    else:
+        plt.savefig(savefig)
     plt.close()
     # plt.show()    
 

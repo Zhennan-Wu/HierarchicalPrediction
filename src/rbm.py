@@ -22,7 +22,7 @@ import os
 
 
 class RBM(BernoulliRBM):
-    def __init__(self, n_components=2, learning_rate=0.1, batch_size=10, n_iter=10, verbose=0, savefile="./", random_state=None, add_bias=False, target_in_model=False, hybrid=False, input_dist='bernoulli', latent_dist='bernoulli',target_dist='gaussian'):
+    def __init__(self, n_components=2, learning_rate=0.1, lr_decay_factor = 0.5, lr_no_decay_length = 100, lr_decay = False, batch_size=10, n_iter=10, verbose=0, savefile="./", random_state=None, add_bias=False, target_in_model=False, hybrid=False, input_dist='bernoulli', latent_dist='bernoulli',target_dist='gaussian'):
         super().__init__(n_components=n_components, learning_rate=learning_rate,
                          batch_size=batch_size, n_iter=n_iter, verbose=verbose, random_state=random_state)
         self.add_bias = add_bias
@@ -31,6 +31,9 @@ class RBM(BernoulliRBM):
         self.target_dist = target_dist # 'bernoulli' or 'gaussian'
         self.target_in_model = target_in_model
         self.hybrid = hybrid
+        self.lr_decay_factor = lr_decay_factor
+        self.lr_no_decay_length = lr_no_decay_length
+        self.lr_decay = lr_decay
         
         if (not os.path.exists(savefile)):
             os.makedirs(savefile)
@@ -317,7 +320,7 @@ class RBM(BernoulliRBM):
 
         self._fit(X, y, self.random_state_)
 
-    def _fit(self, v_pos, t_pos, rng):
+    def _fit(self, v_pos, t_pos, lr, rng):
         """Inner fit for one mini-batch.
 
         Adjust the parameters to maximize the likelihood of v using
@@ -337,7 +340,6 @@ class RBM(BernoulliRBM):
         h_neg = self._mean_hiddens(v_neg, t_neg)
         
 
-        lr = float(self.learning_rate) / v_pos.shape[0]
         update = safe_sparse_dot(v_pos.T, h_pos, dense_output=True).T
         update -= np.dot(h_neg.T, v_neg)
         self.components_ += lr * update * self.hybrid_alpha
@@ -347,7 +349,6 @@ class RBM(BernoulliRBM):
         ) * self.hybrid_alpha
 
         if (self.target_in_model):
-            # target_lr = lr/100.
             target_lr = lr
             update_target = safe_sparse_dot(h_pos.T, t_pos/self.target_sigma, dense_output=True).T
             update_target -= np.dot(h_neg.T, t_neg/self.target_sigma).T
@@ -403,7 +404,7 @@ class RBM(BernoulliRBM):
 
 
     @_fit_context(prefer_skip_nested_validation=True)
-    def fit(self, X, y, sample_size=100, sigma = 0.1, target_sigma = 0.1, hybrid_alpha=1.):
+    def fit(self, X, y, sample_size=100, sigma = 0.1, target_sigma = 0.1, hybrid_alpha=1., showplot=False):
         """Fit the model to the data X.
 
         Parameters
@@ -450,10 +451,14 @@ class RBM(BernoulliRBM):
         )
         energy_mean_tracking = []
         energy_var_tracking = []
-        for _ in range(1, self.n_iter + 1):
+        for epoch in range(1, self.n_iter + 1):
             energy = []
+            if (self.lr_decay):
+                lr = float(self.learning_rate) * self.lr_decay_factor ** (epoch // self.lr_no_decay_length)
+            else:
+                lr = float(self.learning_rate)
             for batch_slice in batch_slices:
-                self._fit(X[batch_slice], y[batch_slice], rng)
+                self._fit(X[batch_slice], y[batch_slice], lr, rng)
                 energy.append(self.estimate_energy(X, y, rng))
             energy_mean_tracking.append(np.mean(np.array(energy)))
             energy_var_tracking.append(np.var(np.array(energy)))
@@ -470,12 +475,20 @@ class RBM(BernoulliRBM):
         plt.ylabel("Energy")
         plt.title("Energy vs Iteration")
         plt.legend()
-        plt.savefig(self.savefile + "energy.png")
+        if (showplot):
+            # Add a caption
+            plt.figtext(0.5, 0.02, self.savefile + "energy.png", ha='center', fontsize=10, color='gray')
+
+            # Show the plot
+            plt.tight_layout()
+            plt.show()
+        else:
+            plt.savefig(self.savefile + "energy.png")
         plt.close()
 
         return self
 
-    def fit_dataloader(self, dataloader, v_dim, t_dim, components=None, target_components=None, visible_bias=None, hidden_bias=None, target_bias=None, sample_size=100, sigma=0.1, target_sigma=0.1, hybrid_alpha=1.):
+    def fit_dataloader(self, dataloader, v_dim, t_dim, components=None, target_components=None, visible_bias=None, hidden_bias=None, target_bias=None, sample_size=100, sigma=0.1, target_sigma=0.1, hybrid_alpha=1., showplot=False):
         """Fit the model to the data X.
 
         Parameters
@@ -529,12 +542,16 @@ class RBM(BernoulliRBM):
 
         energy_mean_tracking = []
         energy_var_tracking = []
-        for _ in range(1, self.n_iter + 1):
+        for epoch in range(1, self.n_iter + 1):
             energy = []
+            if (self.lr_decay):
+                lr = float(self.learning_rate) * self.lr_decay_factor ** (epoch // self.lr_no_decay_length)
+            else:
+                lr = float(self.learning_rate)
             for X, y in dataloader:
                 X = X.detach().cpu().numpy()
                 y = y.detach().cpu().numpy().reshape(-1, t_dim)
-                self._fit(X, y, rng)
+                self._fit(X, y, lr, rng)
                 energy.append(self.estimate_energy(X, y, rng))
             energy_mean_tracking.append(np.mean(np.array(energy)))
             energy_var_tracking.append(np.var(np.array(energy)))
@@ -551,7 +568,15 @@ class RBM(BernoulliRBM):
         plt.ylabel("Energy")
         plt.title("Energy vs Iteration")
         plt.legend()
-        plt.savefig(self.savefile + "energy.png")
+        if (showplot):
+            # Add a caption
+            plt.figtext(0.5, 0.02, self.savefile + "energy.png", ha='center', fontsize=10, color='gray')
+
+            # Show the plot
+            plt.tight_layout()
+            plt.show()
+        else:
+            plt.savefig(self.savefile + "energy.png")
         plt.close()
 
         return self

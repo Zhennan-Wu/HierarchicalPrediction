@@ -1,2 +1,0 @@
-MAE for all 0 selection: tensor(0.1323, dtype=torch.float64)
-The whole dataset has 60000 data. The dimension of each data is 784. Batch size is 1000.
