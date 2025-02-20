@@ -24,6 +24,7 @@ class HDP_DIST_INFO:
     def get_latent_distribution_indices(self):
         return self.latent_distribution_indices
     
+    
 class INFO:
     def __init__(self, count: int, label: torch.Tensor, param: torch.Tensor) -> None:
         self.count = count
@@ -193,6 +194,32 @@ def visualize_data(hidden_loader, level, savefig, showplot=False):
     plt.close()
     # plt.show()    
 
+def visualize_data_from_tensor(X_train_bin, y_train, savefig, showplot=False):
+    X_train_embedded = X_train_bin.detach().cpu().numpy()
+    y_train = y_train.detach().cpu().numpy()
+    y_train_input = y_train.reshape(X_train_bin.shape[0], -1) / 10.0
+    
+    umap = UMAP()
+    # Fit and transform the data
+    X_train_umap = umap.fit_transform(X_train_embedded)
+    
+    # Plot the results
+    plt.figure(figsize=(10, 8))
+    scatter = plt.scatter(X_train_umap[:, 0], X_train_umap[:, 1], c=y_train, cmap="Spectral", s=1, alpha=0.6)
+    plt.colorbar(scatter, label="Digit Label")
+    plt.title("UMAP Encoding")
+    plt.xlabel("UMAP Dimension 1")
+    plt.ylabel("UMAP Dimension 2")
+    if (showplot):
+        # Add a caption
+        plt.figtext(0.5, 0.02, savefig, ha='center', fontsize=10, color='gray')
+        # Show the plot
+        plt.tight_layout()
+        plt.show()
+    else:
+        plt.savefig(savefig)
+    plt.close()
+  
 
 def project_points_to_simplex(points):
     """
@@ -206,10 +233,10 @@ def project_points_to_simplex(points):
     """
     # Number of points and dimension
     num_points, dim = points.shape
-    
+
     # Array to store the projected points
     projected_points = np.zeros_like(points)
-    
+
     for i in range(num_points):
         point = points[i]
         
@@ -225,5 +252,141 @@ def project_points_to_simplex(points):
         
         # Step 4: Project point onto the simplex
         projected_points[i] = np.maximum(point - theta, 0)
-    
+
     return projected_points
+
+
+def load_train_data(file_name, cell2id, drug2id):
+    """
+    Load the cell drug response data from a file and return feature vectors and labels.
+
+    Parameters:
+        file_name (str): the name of the file containing cell line, drug, and response values
+        cell2id (dict): a dictionary mapping cell line names to unique identifiers
+        drug2id (dict): a dictionary mapping drug names to unique identifiers
+    
+    Returns: 
+        [list1, list2]: a list of feature vectors and a list of labels
+    """
+     
+    feature = []
+    label = []
+
+    with open(file_name, 'r') as fi:
+        for line in fi:
+            tokens = line.strip().split('\t')
+
+            feature.append([cell2id[tokens[0]], drug2id[tokens[1]]])
+            label.append([float(tokens[2])])
+
+    return feature, label
+
+
+def prepare_predict_data(test_file, cell2id_mapping_file, drug2id_mapping_file):
+    """
+    Prepare the test data for prediction.
+    
+    Parameters:
+        test_file (str): the name of the file containing cell line, drug, and response values
+        cell2id_mapping_file (str): the name of the file containing the mapping of cell lines to unique identifiers
+        drug2id_mapping_file (str): the name of the file containing the mapping of drugs to unique identifiers
+        
+    Returns:
+        [(torch.Tensor, torch.Tensor)]: a tuple containing the test feature vectors, the test labels, the cell line mapping, and the drug mapping
+    """
+    # load mapping files
+    cell2id_mapping = load_mapping(cell2id_mapping_file)
+    drug2id_mapping = load_mapping(drug2id_mapping_file)
+
+    test_feature, test_label = load_train_data(test_file, cell2id_mapping, drug2id_mapping)
+
+    print('Total number of cell lines = %d' % len(cell2id_mapping))
+    print('Total number of drugs = %d' % len(drug2id_mapping))
+
+    return (torch.Tensor(test_feature), torch.Tensor(test_label)), cell2id_mapping, drug2id_mapping
+
+
+def load_mapping(mapping_file):
+    """
+    From the name index file, create a dictionary mapping names to unique identifiers.
+
+    Parameters:
+        mapping_file (str): the name of the file containing the mapping of names to unique identifiers
+    
+    Returns:
+        dict: a dictionary mapping names to unique identifiers
+    """
+    mapping = {}
+
+    file_handle = open(mapping_file)
+
+    for line in file_handle:
+        line = line.rstrip().split()
+        mapping[line[1]] = int(line[0])
+
+    file_handle.close()
+
+    return mapping
+
+
+def prepare_train_data(train_file, test_file, cell2id_mapping_file, drug2id_mapping_file):
+    """
+    Prepare the training data for prediction and the testing data.
+
+    Parameters:
+        train_file (str): the name of the file containing the training data
+        test_file (str): the name of the file containing the testing data
+        cell2id_mapping_file (str): the name of the file containing the mapping of cell lines to unique identifiers
+        drug2id_mapping_file (str): the name of the file containing the mapping of drugs to unique identifiers
+    
+    Returns:
+        [(torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor)]: a tuple containing the training feature vectors, the training labels, the testing feature vectors, and the testing labels
+    """
+    # load mapping files
+    cell2id_mapping = load_mapping(cell2id_mapping_file)
+    drug2id_mapping = load_mapping(drug2id_mapping_file)
+
+    train_feature, train_label = load_train_data(train_file, cell2id_mapping, drug2id_mapping)
+    test_feature, test_label = load_train_data(test_file, cell2id_mapping, drug2id_mapping)
+
+    print('Total number of cell lines = %d' % len(cell2id_mapping))
+    print('Total number of drugs = %d' % len(drug2id_mapping))
+
+    return (torch.Tensor(train_feature), torch.FloatTensor(train_label), torch.Tensor(test_feature), torch.FloatTensor(test_label)), cell2id_mapping, drug2id_mapping
+
+
+def build_input_vector(input_data, cell_features, drug_features):
+    """
+    Combine the cell and drug features into a single input vector.
+
+    Parameters:
+        input_data (torch.Tensor): a tensor containing the indices of the cell lines and drugs
+        cell_features (np.ndarray): a numpy array containing the cell features
+        drug_features (np.ndarray): a numpy array containing the drug features
+    
+    Returns:
+        torch.Tensor: a tensor containing the combined cell and drug features
+    """
+    genedim = len(cell_features[0,:])
+    drugdim = len(drug_features[0,:])
+    feature = np.zeros((input_data.size()[0], (genedim+drugdim)))
+
+    for i in range(input_data.size()[0]):
+        feature[i] = np.concatenate((cell_features[int(input_data[i,0])], drug_features[int(input_data[i,1])]), axis=None)
+
+    feature = torch.from_numpy(feature).float()
+    return feature
+
+
+def load_feature(feature_file):
+    """
+    Load the feature vectors from a file.
+
+    Parameters:
+        feature_file (str): the name of the file containing the feature vectors
+    
+    Returns:
+        np.ndarray: a numpy array containing the feature vectors
+    """
+    feature = np.loadtxt(feature_file, delimiter=",", dtype=int)
+    return feature
