@@ -488,7 +488,7 @@ if __name__ == "__main__":
     training_dataset = CSVDrugResponseDataset(data_dir, "training")
     data_loader = torch.utils.data.DataLoader(training_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
     prev_cumu_epochs = 0
-    epochs = 5
+    epochs = 100
     datasize = training_dataset.length # train_x.shape[0]
     data_dimension = 5056 # train_x.shape[1]
     gaussian_middle = False
