@@ -396,13 +396,15 @@ def load_feature(feature_file):
 
 
 class CSVDrugResponseDataset(Dataset):
-    def __init__(self, data_dir, data_cat, mutation_truncate_length = 3008):
-        if (data_cat == "training"):
-            self.responses_path = data_dir + "/cell_drug_responses_training_small.csv"
-        elif (data_cat == "testing"):
-            self.responses_path = data_dir + "/cell_drug_responses_testing_small.csv"
+    def __init__(self, data_dir, data_cat, small_data = True, mutation_truncate_length = 3008):
+        path_head = data_dir + "/cell_drug_responses_"
+        if (small_data):
+            path_tail = "_small.csv"
         else:
-            raise ValueError("data_cat only support training and testing")
+            path_tail = ".csv"
+        assert data_cat in ["training", "testing"], "data_cat must be either 'training' or 'testing'."
+        
+        self.responses_path = path_head + data_cat + path_tail
         self.mutations_path = data_dir + "/binary_mutations.csv"
         self.morgan_footprints_path = data_dir + "/morgan_footprints.csv"
         
