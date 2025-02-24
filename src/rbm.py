@@ -253,7 +253,7 @@ class RBM(BernoulliRBM):
             else:
                 raise ValueError("Invalid target distribution: {}".format(self.target_dist))
         else:
-            target_energy = np.zeros(v.shape[0], dtype=np.float64)
+            target_energy = np.zeros(v.shape[0], dtype=np.float32)
         return np.mean(input_energy + target_energy)
 
     def gibbs(self, v, t):
@@ -297,7 +297,7 @@ class RBM(BernoulliRBM):
         """
         first_pass = not hasattr(self, "components_")
         X = self._validate_data(
-            X, accept_sparse="csr", dtype=np.float64, reset=first_pass
+            X, accept_sparse="csr", dtype=np.float32, reset=first_pass
         )
         if not hasattr(self, "random_state_"):
             self.random_state_ = check_random_state(self.random_state)
@@ -419,8 +419,8 @@ class RBM(BernoulliRBM):
         self : BernoulliRBM
             The fitted model.
         """
-        X = self._validate_data(X, accept_sparse="csr", dtype=np.float64)
-        y = self._validate_data(y, accept_sparse="csr", dtype=np.float64)
+        X = self._validate_data(X, accept_sparse="csr", dtype=np.float32)
+        y = self._validate_data(y, accept_sparse="csr", dtype=np.float32)
         n_samples = X.shape[0]
         
         rng = check_random_state(self.random_state)
@@ -513,7 +513,7 @@ class RBM(BernoulliRBM):
             self.components_ = np.asarray(
                 rng.normal(0, 0.01, (self.n_components, v_dim)),
                 order="F",
-                dtype=np.float64,
+                dtype=np.float32,
             )
         self.sigma = sigma
         self.target_sigma = target_sigma
@@ -523,22 +523,22 @@ class RBM(BernoulliRBM):
             self.target_components_ = np.asarray(
                 rng.normal(0, 0.01, (t_dim, self.n_components)),
                 order="F",
-                dtype=np.float64,
+                dtype=np.float32,
             )
         if (target_bias is not None):
             self.intercept_target_ = target_bias.cpu().numpy()
         else:
-            self.intercept_target_ = np.zeros(t_dim, dtype=np.float64)
+            self.intercept_target_ = np.zeros(t_dim, dtype=np.float32)
         self._n_features_out = self.components_.shape[0]
         if (hidden_bias is not None):
             self.intercept_hidden_ = hidden_bias.cpu().numpy()
         else:
-            self.intercept_hidden_ = np.zeros(self.n_components, dtype=np.float64)
+            self.intercept_hidden_ = np.zeros(self.n_components, dtype=np.float32)
         if (visible_bias is not None):
             self.intercept_visible_ = visible_bias.cpu().numpy()
         else:
-            self.intercept_visible_ = np.zeros(v_dim, dtype=np.float64)
-        self.h_samples_ = np.zeros((dataloader.batch_size, self.n_components), dtype=np.float64)
+            self.intercept_visible_ = np.zeros(v_dim, dtype=np.float32)
+        self.h_samples_ = np.zeros((dataloader.batch_size, self.n_components), dtype=np.float32)
 
         energy_mean_tracking = []
         energy_var_tracking = []

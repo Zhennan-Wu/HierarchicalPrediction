@@ -34,13 +34,13 @@ class DBN:
         self.gaussian_middle = gaussian_middle
         self.gaussian_top = gaussian_top
         if (top_sigma is None):
-            self.top_sigma = torch.ones((1,), dtype=torch.float64, device=self.device)/10.
+            self.top_sigma = torch.ones((1,), dtype=torch.float32, device=self.device)/10.
         else:
-            self.top_sigma = top_sigma.to(torch.float64).to(self.device)
+            self.top_sigma = top_sigma.to(torch.float32).to(self.device)
         if (sigma is None):
-            self.sigma = torch.ones((input_size,), dtype=torch.float64, device=self.device)/10.
+            self.sigma = torch.ones((input_size,), dtype=torch.float32, device=self.device)/10.
         else:
-            self.sigma = sigma.to(torch.float64).to(self.device)
+            self.sigma = sigma.to(torch.float32).to(self.device)
         self.savefile = savefile
         self.epochs = epochs
         self.learning_rate = learning_rate
@@ -57,13 +57,14 @@ class DBN:
         """
         Sample visible units given hidden units
         """
-        W = self.layer_parameters[layer_index]["W"]
+        W = self.layer_parameters[layer_index]["W"].to(torch.float32)
         if (layer_index == 0):
-            vb = self.visible_bias
-            sigma = self.sigma
+            vb = self.visible_bias.to(torch.float32)
+            sigma = self.sigma.to(torch.float32)
         else:
-            vb = self.layer_parameters[layer_index-1]["hb"]
-            sigma = torch.ones((1,), dtype=torch.float64, device=self.device)/10.
+            vb = self.layer_parameters[layer_index-1]["hb"].to(torch.float32)
+            sigma = torch.ones((1,), dtype=torch.float32, device=self.device)/10.
+            sigma = sigma.to(torch.float32)
 
         if (input_mode == "gaussian"):
             activation = torch.matmul(y, W)*sigma + vb
@@ -86,15 +87,15 @@ class DBN:
         """
         Sample hidden units given visible units
         """
-        W_bottom = self.layer_parameters[layer_index]["W"]
-        bias = self.layer_parameters[layer_index]["hb"]
+        W_bottom = self.layer_parameters[layer_index]["W"].to(torch.float32)
+        bias = self.layer_parameters[layer_index]["hb"].to(torch.float32)
         if (layer_index == 0):
             if (input_mode == "gaussian"):
                 activation = torch.matmul(x_bottom/self.sigma, W_bottom.t()) + bias
             else:
                 activation = torch.matmul(x_bottom, W_bottom.t()) + bias
         else:    
-            logistic_sigma = torch.ones((1,), dtype=torch.float64, device=self.device)/10.
+            logistic_sigma = torch.ones((1,), dtype=torch.float32, device=self.device)/10.
             if (input_mode == "gaussian"):
                 activation = torch.matmul(x_bottom/logistic_sigma, W_bottom.t()) + bias
             else:
@@ -125,8 +126,8 @@ class DBN:
             p_r_given_h = None
         else:
             raise ValueError("Should not sample r in this case")
-            # p_r_given_h = torch.ones((self.batch_size, 1), dtype=torch.float64, device=self.device)
-            # variable = torch.ones((self.batch_size, 1), dtype=torch.float64, device=self.device)
+            # p_r_given_h = torch.ones((self.batch_size, 1), dtype=torch.float32, device=self.device)
+            # variable = torch.ones((self.batch_size, 1), dtype=torch.float32, device=self.device)
         return p_r_given_h, variable
         
     def generate_input_for_layer(self, index: int, dataloader: DataLoader, pretrain: bool=True) -> DataLoader:
@@ -136,7 +137,16 @@ class DBN:
         input_layer = []
         input_labels = []
         if (index == 0):
-            return dataloader
+            for batch, label in dataloader:
+                input_layer.append(batch)
+                input_labels.append(label)
+            input_data = torch.cat(input_layer, dim=0)
+            input_labels = torch.cat(input_labels, dim=0)
+            if not torch.all((input_data >= 0) & (input_data <= 1)):
+                raise ValueError("Tensor contains elements outside the range [0, 1].")
+            dataset = TensorDataset(input_data, input_labels)
+            hidden_loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
+            return hidden_loader
         else:
             for batch, label in dataloader:
                 p_x_dash, x_dash = self.generate_activation_input_for_layer(index, batch, label)
@@ -163,7 +173,7 @@ class DBN:
             x_gen = []
             for _ in range(self.k):
                 x_dash = dataset.to(self.device)
-                label = label.unsqueeze(1).to(torch.float64).to(self.device)
+                label = label.unsqueeze(1).to(torch.float32).to(self.device)
                 for i in range(index):  
                     if (i == 0):
                         p_x, x_dash = self.sample_h(i, x_dash, label, self.mode)
@@ -176,7 +186,7 @@ class DBN:
 
             if not torch.all((x_dash >= 0) & (x_dash <= 1)):
                 raise ValueError("Tensor contains elements outside the range [0, 1].")
-            return x_dash.to(torch.float64).to(self.device), x_binary.to(torch.float64).to(self.device)
+            return x_dash.to(torch.float32).to(self.device), x_binary.to(torch.float32).to(self.device)
     
     def train(self, dataloader: DataLoader, savefig: str = None, showplot: bool = False):
         """
@@ -213,16 +223,16 @@ class DBN:
             else:
                 visible_bias = self.layer_parameters[index-1]["hb"]
             rbm.fit_dataloader(hidden_loader, vn, 1, components=self.layer_parameters[index]["W"], target_components=self.layer_parameters[index]["tW"], visible_bias=visible_bias, hidden_bias=self.layer_parameters[index]["hb"], target_bias=self.layer_parameters[index]["tb"], sample_size=self.multinomial_sample_size, sigma=torch.mean(self.sigma).item(), target_sigma=torch.mean(self.top_sigma).item(), hybrid_alpha=self.disc_alpha, showplot=showplot)
-            self.layer_parameters[index]["W"] = torch.tensor(rbm.components_, dtype=torch.float64, device=self.device)
-            self.layer_parameters[index]["hb"] = torch.tensor(rbm.intercept_hidden_, dtype=torch.float64, device=self.device)
-            self.layer_parameters[index]["tW"] = torch.tensor(rbm.target_components_, dtype=torch.float64, device=self.device)
-            self.layer_parameters[index]["tb"] = torch.tensor(rbm.intercept_target_, dtype=torch.float64, device=self.device)
+            self.layer_parameters[index]["W"] = torch.tensor(rbm.components_, dtype=torch.float32, device=self.device)
+            self.layer_parameters[index]["hb"] = torch.tensor(rbm.intercept_hidden_, dtype=torch.float32, device=self.device)
+            self.layer_parameters[index]["tW"] = torch.tensor(rbm.target_components_, dtype=torch.float32, device=self.device)
+            self.layer_parameters[index]["tb"] = torch.tensor(rbm.intercept_target_, dtype=torch.float32, device=self.device)
             if (index == 0):
-                self.visible_bias = torch.tensor(rbm.intercept_visible_, dtype=torch.float64, device=self.device)
+                self.visible_bias = torch.tensor(rbm.intercept_visible_, dtype=torch.float32, device=self.device)
             else:
-                self.layer_parameters[index-1]["hb"] = torch.tensor(rbm.intercept_visible_, dtype=torch.float64, device=self.device)
-            self.top_parameters["TW"] = torch.tensor(rbm.target_components_, dtype=torch.float64, device=self.device)
-            self.top_parameters["Tb"] = torch.tensor(rbm.intercept_target_, dtype=torch.float64, device=self.device)
+                self.layer_parameters[index-1]["hb"] = torch.tensor(rbm.intercept_visible_, dtype=torch.float32, device=self.device)
+            self.top_parameters["TW"] = torch.tensor(rbm.target_components_, dtype=torch.float32, device=self.device)
+            self.top_parameters["Tb"] = torch.tensor(rbm.intercept_target_, dtype=torch.float32, device=self.device)
 
             print("Finished Training Layer", index, "to", index+1)
             end_time = time.time()
@@ -241,7 +251,7 @@ class DBN:
     #     """
     #     if (depth == -1):
     #         depth = len(self.layers)
-    #     energy = torch.zeros(x.size(0), dtype=torch.float64, device=self.device)
+    #     energy = torch.zeros(x.size(0), dtype=torch.float32, device=self.device)
     #     for i in range(depth):
     #         if (i == 0):
     #             input_mode = self.mode
@@ -282,7 +292,7 @@ class DBN:
     #     energy = []
     #     for batch, label in dataloader:
     #         batch = batch.to(self.device)
-    #         label = label.unsqueeze(1).to(torch.float64).to(self.device)
+    #         label = label.unsqueeze(1).to(torch.float32).to(self.device)
     #         energy.append(self.estimate_multilayer_energy(batch, label, depth))
     #     return energy
 
@@ -328,7 +338,7 @@ class DBN:
         data_labels = []
         for batch, label in dataloader:
             batch = batch.to(self.device)
-            label = label.unsqueeze(1).to(torch.float64).to(self.device)
+            label = label.unsqueeze(1).to(torch.float32).to(self.device)
             visible, latent = self.reconstructor(batch, label, depth)
             visible_data.append(visible)
             latent_vars.append(latent)
@@ -348,7 +358,7 @@ class DBN:
         reconstruction_error = []
         for batch, label in dataloader:
             batch = batch.to(self.device)
-            label = label.unsqueeze(1).to(torch.float64).to(self.device)
+            label = label.unsqueeze(1).to(torch.float32).to(self.device)
             visible, _ = self.reconstructor(batch, label, depth)
             reconstruction_error.append(torch.mean((visible-batch)**2))
         return reconstruction_error
@@ -377,7 +387,7 @@ class DBN:
         labels = []
         for data, label in dataloader:
             data = data.to(self.device)
-            label = label.unsqueeze(1).to(torch.float64).to(self.device)
+            label = label.unsqueeze(1).to(torch.float32).to(self.device)
             latent_vars.append(self.encoder(data, label, depth))
             labels.append(label)
         latent_vars = torch.cat(latent_vars, dim=0)
@@ -479,7 +489,7 @@ if __name__ == "__main__":
     data_loader = torch.utils.data.DataLoader(training_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
     prev_cumu_epochs = 0
     epochs = 5
-    datasize = 119230 # train_x.shape[0]
+    datasize = training_dataset.length # train_x.shape[0]
     data_dimension = 5056 # train_x.shape[1]
     gaussian_middle = False
     learning_rate = 0.001

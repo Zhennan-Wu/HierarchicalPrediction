@@ -44,7 +44,7 @@ class DBM(DBN):
         if (x_top is not None):
             x_top = x_top.to(self.device)
         else:
-            x_top = torch.zeros((1, W_top.size(0)), dtype = torch.float64, device=self.device)
+            x_top = torch.zeros((1, W_top.size(0)), dtype = torch.float32, device=self.device)
         if (layer_index == 0):
             if (self.mode == "gaussian"):
                 activation = torch.matmul(x_bottom/self.sigma, W_bottom.t()) + torch.matmul(x_top, W_top) + bias
@@ -63,8 +63,8 @@ class DBM(DBN):
         else:
             p_h_given_v = torch.sigmoid(activation)
             variables = torch.bernoulli(p_h_given_v)
-        p_h_given_v = p_h_given_v.to(torch.float64)
-        variables = variables.to(torch.float64)
+        p_h_given_v = p_h_given_v.to(torch.float32)
+        variables = variables.to(torch.float32)
         return p_h_given_v, variables
 
     def generate_latent_sample_for_layer(self, index: int, dataset: torch.Tensor) -> torch.Tensor:
@@ -85,7 +85,7 @@ class DBM(DBN):
         '''
         Estimate the energy of the model
         '''
-        energy = torch.zeros(variables[0].size(0), dtype=torch.float64, device=self.device)
+        energy = torch.zeros(variables[0].size(0), dtype=torch.float32, device=self.device)
         for index in range(len(self.layers)):
             energy += torch.sum(torch.matmul(variables[index+1], self.layer_parameters[index]["W"])*variables[index], axis=1)
             if (self.bias):
@@ -166,7 +166,7 @@ class DBM(DBN):
         Calculate the Evidence Lower Bound (ELBO) of the data
         '''
         with torch.no_grad():
-            elbo = torch.tensor(0., dtype=torch.float64, device=self.device)
+            elbo = torch.tensor(0., dtype=torch.float32, device=self.device)
             for index in range(len(self.layers)-1):
                 elbo += torch.sum(torch.matmul(self.layer_mean_field_parameters[index+1]["mu"], self.layer_parameters[index+1]["W"])*self.layer_mean_field_parameters[index]["mu"])
                 if (self.bias):
@@ -246,7 +246,7 @@ class DBM(DBN):
                 if (index == 0):
                     variables[index].append(data)
                 elif (index == len(self.layers)+1):
-                    variables[index].append(label.to(torch.float64).unsqueeze(1))
+                    variables[index].append(label.to(torch.float32).unsqueeze(1))
                 else:
                     variables[index].append(self.generate_latent_sample_for_layer(index, data))
         
@@ -295,20 +295,20 @@ class DBM(DBN):
                     for index in range(variable_size):
                         if (index == 0):
                             if (self.mode == "gaussian"):
-                                variables[index].append(dist.Normal(0., 1.).sample((self.batch_size, self.input_size)).to(torch.float64).to(self.device))
+                                variables[index].append(dist.Normal(0., 1.).sample((self.batch_size, self.input_size)).to(torch.float32).to(self.device))
                             else:
-                                variables[index].append(dist.Bernoulli(0.5).sample((self.batch_size, self.input_size)).to(torch.float64).to(self.device))
+                                variables[index].append(dist.Bernoulli(0.5).sample((self.batch_size, self.input_size)).to(torch.float32).to(self.device))
                         elif (index == len(self.layers)+1):
-                            variables[index].append(dist.Normal(0., 1.).sample((self.batch_size, 1)).to(torch.float64).to(self.device))
+                            variables[index].append(dist.Normal(0., 1.).sample((self.batch_size, 1)).to(torch.float32).to(self.device))
                         else:
-                            variables[index].append(dist.Bernoulli(0.5).sample((self.batch_size, self.layers[index-1])).to(torch.float64).to(self.device))
+                            variables[index].append(dist.Bernoulli(0.5).sample((self.batch_size, self.layers[index-1])).to(torch.float32).to(self.device))
             else:
                 for data, label in dataloader:
                     for index in range(variable_size):
                         if (index == 0):
                             variables[index].append(data)
                         elif (index == len(self.layers)+1):
-                            variables[index].append(label.to(torch.float64).unsqueeze(1))
+                            variables[index].append(label.to(torch.float32).unsqueeze(1))
                         else:
                             variables[index].append(self.generate_latent_sample_for_layer(index, data))
 =======
@@ -317,7 +317,7 @@ class DBM(DBN):
                     if (index == 0):
                         variables[index].append(data)
                     elif (index == len(self.layers)+1):
-                        variables[index].append(label.to(torch.float64).unsqueeze(1))
+                        variables[index].append(label.to(torch.float32).unsqueeze(1))
                     else:
                         variables[index].append(self.generate_latent_sample_for_layer(index, data))
 >>>>>>> c2a96848fb6bf9e952c352b58ccee49b2fc54985
@@ -343,12 +343,12 @@ class DBM(DBN):
                 dataset_index = 0
                 for dataset, mcmc_samples, disc_samples in zip(dataloader, mcmc_loader, disc_loader):
                     elbos = []
-                    label = dataset[1].unsqueeze(1).to(torch.float64).to(self.device)
+                    label = dataset[1].unsqueeze(1).to(torch.float32).to(self.device)
                     dataset = dataset[0].to(self.device)
                     mcmc_samples = [sample.to(self.device) for sample in mcmc_samples]
                     disc_samples = [sample.to(self.device) for sample in disc_samples]
                     for index, _ in enumerate(self.layers):
-                        unnormalized_mf_param = torch.rand((self.batch_size, self.layers[index]), dtype=torch.float64, device = self.device)
+                        unnormalized_mf_param = torch.rand((self.batch_size, self.layers[index]), dtype=torch.float32, device = self.device)
                         self.layer_mean_field_parameters[index]["mu"] = unnormalized_mf_param/torch.sum(unnormalized_mf_param, dim=1).unsqueeze(1)
 
                     mf_step = 0
