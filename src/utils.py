@@ -4,8 +4,11 @@ import random
 from umap import UMAP
 import matplotlib.pyplot as plt 
 import numpy as np
+import pandas as pd
+
 
 from pyro.distributions import Categorical
+from torch.utils.data import Dataset
 from typing import Any, Union, List, Tuple, Dict
    
 
@@ -390,3 +393,44 @@ def load_feature(feature_file):
     """
     feature = np.loadtxt(feature_file, delimiter=",", dtype=int)
     return feature
+
+
+class CSVDrugResponseDataset(Dataset):
+    def __init__(self, data_dir, data_cat, mutation_truncate_length = 3008):
+        if (data_cat == "training"):
+            self.responses_path = data_dir + "/cell_drug_responses_training.csv"
+        elif (data_cat == "testing"):
+            self.responses_path = data_dir + "/cell_drug_responses_testing.csv"
+        else:
+            raise ValueError("data_cat only support training and testing")
+        self.mutations_path = data_dir + "/binary_mutations.csv"
+        self.morgan_footprints_path = data_dir + "/morgan_footprints.csv"
+        
+        # Read only the header to get column names
+        with open(self.responses_path, "r") as f:
+            header = f.readline().strip().split(",")
+        
+        mutations_ref = pd.read_csv(self.mutations_path, nrows=mutation_truncate_length)
+        self.mutations_dict = {str(ccl): np.array(mutations_ref[ccl]).astype(np.uint8) for ccl in mutations_ref}
+
+        morgan_footprints_ref = pd.read_csv(self.morgan_footprints_path)
+        self.morgan_footprints_dict = {str(cpd): np.array(morgan_footprints_ref[cpd]).astype(np.uint8) for cpd in morgan_footprints_ref}
+
+        self.label_col = header[-1]  # Last column name (AUC)
+        self.feature_cols = header[:-1]  # All except last column
+        
+        # Read only labels to get dataset length
+        self.data_info = pd.read_csv(self.responses_path, usecols=[self.label_col])
+        self.length = len(self.data_info)
+
+    def __len__(self):
+        return self.length
+
+    def __getitem__(self, idx):
+        # Read a single row efficiently
+        ccl, cpd, auc = pd.read_csv(self.responses_path, skiprows=idx+1, nrows=1, header=None).values[0]
+        mutation = torch.from_numpy(self.mutations_dict[str(ccl)]).to(torch.float32)
+        morgan_footprint = torch.from_numpy(self.morgan_footprints_dict[str(cpd)]).to(torch.float32)
+        features = torch.cat((mutation, morgan_footprint))  # Features (all except last column)
+        label = torch.tensor(auc, dtype=torch.float32)  # Last column (AUC)
+        return features, label

@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import os
 import numpy as np
 from rbm import RBM
-from utils import visualize_rbm, visualize_data, project_points_to_simplex
+from utils import visualize_rbm, visualize_data, project_points_to_simplex, CSVDrugResponseDataset
 
 from load_dataset import MNIST
 
@@ -469,15 +469,18 @@ class DBN:
 
 
 if __name__ == "__main__":
-    mnist = MNIST()
-    train_x, train_y, test_x, test_y = mnist.load_dataset()
-    train_y = train_y/10.
-    print('MAE for all 0 selection:', torch.mean(train_x))
-    batch_size = 1000	
+    # mnist = MNIST()
+    # train_x, train_y, test_x, test_y = mnist.load_dataset()
+    # train_y = train_y/10.
+    # print('MAE for all 0 selection:', torch.mean(train_x))
+    data_dir = "../dataset/Cancer"
+    batch_size = 100
+    training_dataset = CSVDrugResponseDataset(data_dir, "training")
+    data_loader = torch.utils.data.DataLoader(training_dataset, batch_size=batch_size, shuffle=False, num_workers=2)
     prev_cumu_epochs = 0
     epochs = 5
-    datasize = train_x.shape[0]
-    data_dimension = train_x.shape[1]
+    datasize = 119230 # train_x.shape[0]
+    data_dimension = 5056 # train_x.shape[1]
     gaussian_middle = False
     learning_rate = 0.001
     lr_decay_factor = 0.5
@@ -486,23 +489,23 @@ if __name__ == "__main__":
     
     print("The whole dataset has {} data. The dimension of each data is {}. Batch size is {}.".format(datasize, data_dimension, batch_size))
     
-    dataset = TensorDataset(train_x, train_y)
-    data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    # dataset = TensorDataset(train_x, train_y)
+    # data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
-    for experiment in ["bernoulli", "multinomial", "bernoulli_label", "multinomial_label"]:
-        directory = "../results/plots/DBN_debug2/epoch_{}/".format(epochs + prev_cumu_epochs)
+    for experiment in ["bernoulli", "multinomial"]:
+        directory = "../results/plots/DBN_ccl/epoch_{}/".format(epochs + prev_cumu_epochs)
         experi_type = experiment
-        directory = directory + "UMAP_" + experi_type + "/"
-        filename = "dbn_debug2_" + experi_type + ".pth"
+        directory = directory + "UMAP_ccl_" + experi_type + "/"
+        filename = "dbn_ccl_" + experi_type + ".pth"
         if not os.path.exists(directory):
             os.makedirs(directory)
 
         if (experiment == "bernoulli"):
-            dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, learning_rate=learning_rate, lr_decay_factor=lr_decay_factor, lr_no_decay_length=lr_no_decay_length, lr_decay=lr_decay, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = False, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1., gaussian_middle = gaussian_middle)
+            dbn = DBN(data_dimension, layers=[2000, 500, 100], batch_size=batch_size, learning_rate=learning_rate, lr_decay_factor=lr_decay_factor, lr_no_decay_length=lr_no_decay_length, lr_decay=lr_decay, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = False, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1., gaussian_middle = gaussian_middle)
         elif (experiment == "bernoulli_label"):
             dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, learning_rate=learning_rate, lr_decay_factor=lr_decay_factor, lr_no_decay_length=lr_no_decay_length, lr_decay=lr_decay, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = False, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = True, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1., gaussian_middle = gaussian_middle)
         elif (experiment == "multinomial"):
-            dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, learning_rate=learning_rate, lr_decay_factor=lr_decay_factor, lr_no_decay_length=lr_no_decay_length, lr_decay =lr_decay, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = False, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1., gaussian_middle = gaussian_middle)
+            dbn = DBN(data_dimension, layers=[2000, 500, 100], batch_size=batch_size, learning_rate=learning_rate, lr_decay_factor=lr_decay_factor, lr_no_decay_length=lr_no_decay_length, lr_decay =lr_decay, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = False, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1., gaussian_middle = gaussian_middle)
         elif (experiment == "multinomial_label"):
             dbn = DBN(data_dimension, layers=[500, 300, 100], batch_size=batch_size, learning_rate=learning_rate, lr_decay_factor=lr_decay_factor, lr_no_decay_length=lr_no_decay_length, lr_decay=lr_decay, epochs = epochs, savefile=filename, mode = "bernoulli", multinomial_top = True, multinomial_sample_size = 10, bias = False, k = 50, gaussian_top = True, top_sigma = 0.1*torch.ones((1,)), sigma = None, disc_alpha = 1., gaussian_middle = gaussian_middle)
         else:
