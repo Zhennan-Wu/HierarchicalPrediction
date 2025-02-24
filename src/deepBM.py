@@ -20,11 +20,7 @@ class DBM(DBN):
     """
     Deep Boltzmann Machine
     """
-<<<<<<< HEAD
-    def __init__(self, input_size: int, layers: list, batch_size: int, learning_rate=0.001, lr_decay_factor = 0.5, lr_no_decay_length = 100, lr_decay = False, epochs: int = 10, savefile: str = None, mode: str = "bernoulli", multinomial_top: bool=False, multinomial_sample_size: int = 0, bias: bool = False, k: int = 5, gaussian_top: bool = False, top_sigma: torch.Tensor = None, sigma: torch.Tensor = None, disc_alpha: float = 1.0, gaussian_middle = False):
-=======
     def __init__(self, input_size: int, layers: list, batch_size: int, learning_rate=0.1, lr_decay_factor = 0.5, lr_no_decay_length = 100, lr_decay = False, epochs: int = 10, savefile: str = None, mode: str = "bernoulli", multinomial_top: bool=False, multinomial_sample_size: int = 0, bias: bool = False, k: int = 5, gaussian_top: bool = False, top_sigma: torch.Tensor = None, sigma: torch.Tensor = None, disc_alpha: float = 1.0, gaussian_middle = False):
->>>>>>> c2a96848fb6bf9e952c352b58ccee49b2fc54985
         super().__init__(input_size, layers, batch_size, learning_rate, lr_decay_factor, lr_no_decay_length, lr_decay, epochs, savefile, mode, multinomial_top, multinomial_sample_size, bias, k, gaussian_top, top_sigma, sigma, disc_alpha, gaussian_middle)
 
         self.layer_mean_field_parameters = [{"mu":None} for _ in range(len(layers))]
@@ -265,20 +261,11 @@ class DBM(DBN):
             savefig = directory + "DBM_{}".format(index+1)
             visualize_data(hidden_loader, index+1, savefig)
         
-<<<<<<< HEAD
-    def train(self, dataloader: DataLoader, directory: str, mcmc_loader: DataLoader=None, disc_loader: DataLoader=None, gibbs_iterations: int=50, mf_maximum_steps: int=30, mf_threshold: float=0.1, convergence_consecutive_hits: int=3, epochs: int = None, display: bool = False, random_init: bool=True) -> List[DataLoader]:
-=======
     def train(self, dataloader: DataLoader, directory: str, mcmc_loader: DataLoader=None, disc_loader: DataLoader=None, gibbs_iterations: int=50, mf_maximum_steps: int=30, mf_threshold: float=0.1, convergence_consecutive_hits: int=3, display: bool = False) -> List[DataLoader]:
->>>>>>> c2a96848fb6bf9e952c352b58ccee49b2fc54985
         """
         Train DBM
         """
         # Initialize mean field parameters
-<<<<<<< HEAD
-        if (epochs is not None):
-            self.epochs = epochs
-=======
->>>>>>> c2a96848fb6bf9e952c352b58ccee49b2fc54985
         if (not os.path.exists(directory)):
             os.makedirs(directory)
         energy_mean_tracking = []
@@ -289,29 +276,6 @@ class DBM(DBN):
             else:
                 variable_size = len(self.layers)+1
             variables = [[] for _ in range(variable_size)]
-<<<<<<< HEAD
-            if (random_init):
-                for data, label in dataloader:
-                    for index in range(variable_size):
-                        if (index == 0):
-                            if (self.mode == "gaussian"):
-                                variables[index].append(dist.Normal(0., 1.).sample((self.batch_size, self.input_size)).to(torch.float32).to(self.device))
-                            else:
-                                variables[index].append(dist.Bernoulli(0.5).sample((self.batch_size, self.input_size)).to(torch.float32).to(self.device))
-                        elif (index == len(self.layers)+1):
-                            variables[index].append(dist.Normal(0., 1.).sample((self.batch_size, 1)).to(torch.float32).to(self.device))
-                        else:
-                            variables[index].append(dist.Bernoulli(0.5).sample((self.batch_size, self.layers[index-1])).to(torch.float32).to(self.device))
-            else:
-                for data, label in dataloader:
-                    for index in range(variable_size):
-                        if (index == 0):
-                            variables[index].append(data)
-                        elif (index == len(self.layers)+1):
-                            variables[index].append(label.to(torch.float32).unsqueeze(1))
-                        else:
-                            variables[index].append(self.generate_latent_sample_for_layer(index, data))
-=======
             for data, label in dataloader:
                 for index in range(variable_size):
                     if (index == 0):
@@ -320,7 +284,6 @@ class DBM(DBN):
                         variables[index].append(label.to(torch.float32).unsqueeze(1))
                     else:
                         variables[index].append(self.generate_latent_sample_for_layer(index, data))
->>>>>>> c2a96848fb6bf9e952c352b58ccee49b2fc54985
             
             tensor_variables = []
             for variable in variables:

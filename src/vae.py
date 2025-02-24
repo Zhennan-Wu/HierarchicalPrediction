@@ -12,6 +12,8 @@ import pyro.contrib.examples.util  # patches torchvision
 from pyro.infer import SVI, Trace_ELBO
 from pyro.optim import Adam
 
+from utils import CSVDrugResponseDataset
+
 assert pyro.__version__.startswith('1.9.1')
 pyro.distributions.enable_validation(False)
 pyro.set_rng_seed(0)
@@ -23,18 +25,13 @@ smoke_test = 'CI' in os.environ
 
 # for loading and batching MNIST dataset
 def setup_data_loaders(batch_size=128, use_cuda=False):
-    root = './data'
-    download = True
-    trans = transforms.ToTensor()
-    train_set = MNIST(root=root, train=True, transform=trans,
-                      download=download)
-    test_set = MNIST(root=root, train=False, transform=trans)
 
-    kwargs = {'num_workers': 1, 'pin_memory': use_cuda}
-    train_loader = torch.utils.data.DataLoader(dataset=train_set,
-        batch_size=batch_size, shuffle=True, **kwargs)
-    test_loader = torch.utils.data.DataLoader(dataset=test_set,
-        batch_size=batch_size, shuffle=False, **kwargs)
+    data_dir = "../dataset/Cancer"
+    training_dataset = CSVDrugResponseDataset(data_dir, "training")
+    train_loader = torch.utils.data.DataLoader(training_dataset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory = use_cuda)
+
+    testing_dataset = CSVDrugResponseDataset(data_dir, "testing")
+    test_loader = torch.utils.data.DataLoader(testing_dataset, batch_size=batch_size, shuffle=True, num_workers=2, pin_memory = use_cuda)
     return train_loader, test_loader
 
 
@@ -43,7 +40,7 @@ class Decoder(nn.Module):
         super().__init__()
         # setup the two linear transformations used
         self.fc1 = nn.Linear(z_dim, hidden_dim)
-        self.fc21 = nn.Linear(hidden_dim, 784)
+        self.fc21 = nn.Linear(hidden_dim, 5056)
         # setup the non-linearities
         self.softplus = nn.Softplus()
         self.sigmoid = nn.Sigmoid()
@@ -62,7 +59,7 @@ class Encoder(nn.Module):
     def __init__(self, z_dim, hidden_dim):
         super().__init__()
         # setup the three linear transformations used
-        self.fc1 = nn.Linear(784, hidden_dim)
+        self.fc1 = nn.Linear(5056, hidden_dim)
         self.fc21 = nn.Linear(hidden_dim, z_dim)
         self.fc22 = nn.Linear(hidden_dim, z_dim)
         # setup the non-linearities
@@ -71,7 +68,7 @@ class Encoder(nn.Module):
     def forward(self, x):
         # define the forward computation on the image x
         # first shape the mini-batch to have pixels in the rightmost dimension
-        x = x.reshape(-1, 784)
+        x = x.reshape(-1, 5056)
         # then compute the hidden units
         hidden = self.softplus(self.fc1(x))
         # then return a mean vector and a (positive) square root covariance
@@ -94,7 +91,7 @@ def model(self, x):
         # decode the latent code z
         loc_img = self.decoder(z)
         # score against actual images
-        pyro.sample("obs", dist.Bernoulli(loc_img).to_event(1), obs=x.reshape(-1, 784))
+        pyro.sample("obs", dist.Bernoulli(loc_img).to_event(1), obs=x.reshape(-1, 5056))
 
 
 # define the guide (i.e. variational distribution) q(z|x)
