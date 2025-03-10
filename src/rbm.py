@@ -116,7 +116,9 @@ class RBM(BernoulliRBM):
         elif (self.latent_dist == 'multinomial'):
             # Verify that rows are normalized
             assert np.allclose(p.sum(axis=1), 1), "Rows of p must be normalized, instead get {}".format(p.sum(axis=1))
-            samples = [rng.multinomial(self.sample_size, pval) for pval in p]
+            # samples = [rng.multinomial(self.sample_size, pval) for pval in p]
+            samples = [np.bincount(np.random.choice(len(pval), size=self.sample_size, p=pval), minlength=len(pval)) for pval in p]
+
             samples = np.array(samples)
         else:
             raise ValueError("Invalid latent distribution: {}".format(self.latent_dist))
